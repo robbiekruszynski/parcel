@@ -9,6 +9,7 @@
     "web": "expo start --web"
   },
   "dependencies": {
+    "@expo-google-fonts/barlow-condensed": "^0.4.1",
     "@expo-google-fonts/dm-mono": "^0.4.2",
     "@expo-google-fonts/rajdhani": "^0.4.1",
     "@expo-google-fonts/syne": "^0.4.2",

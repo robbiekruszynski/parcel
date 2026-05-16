@@ -1,4 +1,5 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { BarlowCondensed_900Black } from '@expo-google-fonts/barlow-condensed';
 import { DMMono_400Regular } from '@expo-google-fonts/dm-mono';
 import { Rajdhani_400Regular, Rajdhani_600SemiBold, Rajdhani_700Bold } from '@expo-google-fonts/rajdhani';
 import { Syne_400Regular, Syne_800ExtraBold, useFonts } from '@expo-google-fonts/syne';
@@ -29,6 +30,7 @@ export default function RootLayout() {
     Rajdhani_400Regular,
     Rajdhani_600SemiBold,
     Rajdhani_700Bold,
+    BarlowCondensed_900Black,
     ...FontAwesome.font,
   });
 
@@ -58,8 +60,8 @@ function RootLayoutNav() {
           ...DarkTheme,
           colors: {
             ...DarkTheme.colors,
-            background: '#0b0d12',
-            card: '#0b0d12',
+            background: '#0e0e10',
+            card: '#0e0e10',
             primary: '#f5c842',
           },
         }
@@ -80,6 +82,7 @@ function RootLayoutNav() {
           <Stack.Screen name="(auth)" />
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="tracking" />
+          <Stack.Screen name="settings" />
         </Stack>
       </ThemeProvider>
     </SafeAreaProvider>

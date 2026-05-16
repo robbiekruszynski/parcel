@@ -7,16 +7,18 @@ module.exports = {
       colors: {
         parcel: {
           bg: {
-            dark: '#0b0d12',
+            dark: '#0e0e10',
             light: '#e8eef5',
           },
+          card: '#16161a',
           map: {
-            dark: '#0b0d12',
+            dark: '#0e0e10',
             'dark-road': '#131820',
             light: '#dce8f0',
             'light-road': '#c8d8e4',
           },
-          gold: '#f5c842',
+          gold: '#f5c518',
+          goldLegacy: '#f5c842',
           alert: '#ff3b3b',
           trail: {
             'dark-start': '#00c8ff',

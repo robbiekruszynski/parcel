@@ -15,6 +15,46 @@ export function useRealtimeTracking() {
   const [permissionIssue, setPermissionIssue] = useState<TrackingPermissionState>('idle');
   const watchRef = useRef<Location.LocationSubscription | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const uidRef = useRef<string | null>(null);
+
+  const startLocationWatch = useCallback(async (uid: string) => {
+    watchRef.current?.remove();
+
+    watchRef.current = await Location.watchPositionAsync(
+      {
+        accuracy: Location.Accuracy.BestForNavigation,
+        timeInterval: 2000,
+        distanceInterval: 3,
+      },
+      async (loc) => {
+        const acc = loc.coords.accuracy;
+        if (acc != null && acc > 45) {
+          if (__DEV__) {
+            console.warn('[useRealtimeTracking] skipped fix, accuracy (m):', acc);
+          }
+          return;
+        }
+
+        const coord = {
+          lat: loc.coords.latitude,
+          lng: loc.coords.longitude,
+        };
+
+        useLocationStore.getState().setPosition(coord);
+        useLocationStore.getState().appendRoute(coord);
+
+        const { error } = await supabase.from('locations').insert({
+          user_id: uid,
+          lat: coord.lat,
+          lng: coord.lng,
+        });
+
+        if (__DEV__ && error) {
+          console.warn('[useRealtimeTracking] location insert failed', error.message);
+        }
+      }
+    );
+  }, []);
 
   const stopTracking = useCallback(async () => {
     watchRef.current?.remove();
@@ -25,9 +65,39 @@ export function useRealtimeTracking() {
       channelRef.current = null;
     }
 
+    uidRef.current = null;
+    useLocationStore.getState().setIsPaused(false);
     useLocationStore.getState().setIsTracking(false);
     useLocationStore.getState().resetRoute();
   }, []);
+
+  const pauseTracking = useCallback(() => {
+    if (!useLocationStore.getState().isTracking) return;
+    watchRef.current?.remove();
+    watchRef.current = null;
+    useLocationStore.getState().setIsPaused(true);
+  }, []);
+
+  const resumeTracking = useCallback(async () => {
+    const uid = uidRef.current;
+    if (
+      !uid ||
+      !useLocationStore.getState().isTracking ||
+      !useLocationStore.getState().isPaused
+    ) {
+      return;
+    }
+
+    const perm = await Location.requestForegroundPermissionsAsync();
+    if (perm.status !== Location.PermissionStatus.GRANTED) {
+      setPermissionIssue('denied_foreground');
+      return;
+    }
+
+    setPermissionIssue('idle');
+    useLocationStore.getState().setIsPaused(false);
+    await startLocationWatch(uid);
+  }, [startLocationWatch]);
 
   const startTracking = useCallback(async () => {
     if (useLocationStore.getState().isTracking) return;
@@ -57,7 +127,14 @@ export function useRealtimeTracking() {
     setPermissionIssue('idle');
 
     useLocationStore.getState().resetRoute();
+    const seed = useLocationStore.getState().position;
+    if (seed) {
+      useLocationStore.getState().appendRoute(seed);
+    }
+
+    useLocationStore.getState().setIsPaused(false);
     useLocationStore.getState().setIsTracking(true);
+    uidRef.current = uid;
 
     const channel = supabase
       .channel(`locations-realtime-${uid}-${Date.now()}`)
@@ -80,33 +157,8 @@ export function useRealtimeTracking() {
 
     channelRef.current = channel;
 
-    watchRef.current = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.BestForNavigation,
-        timeInterval: 3000,
-        distanceInterval: 5,
-      },
-      async (loc) => {
-        const coord = {
-          lat: loc.coords.latitude,
-          lng: loc.coords.longitude,
-        };
-
-        useLocationStore.getState().setPosition(coord);
-        useLocationStore.getState().appendRoute(coord);
-
-        const { error } = await supabase.from('locations').insert({
-          user_id: uid,
-          lat: coord.lat,
-          lng: coord.lng,
-        });
-
-        if (__DEV__ && error) {
-          console.warn('[useRealtimeTracking] location insert failed', error.message);
-        }
-      }
-    );
-  }, []);
+    await startLocationWatch(uid);
+  }, [startLocationWatch]);
 
   useEffect(() => {
     return () => {
@@ -116,6 +168,8 @@ export function useRealtimeTracking() {
         void supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
+      uidRef.current = null;
+      useLocationStore.getState().setIsPaused(false);
       useLocationStore.getState().setIsTracking(false);
     };
   }, []);
@@ -123,6 +177,8 @@ export function useRealtimeTracking() {
   return {
     startTracking,
     stopTracking,
+    pauseTracking,
+    resumeTracking,
     permissionIssue,
     clearPermissionIssue: () => setPermissionIssue('idle'),
   };

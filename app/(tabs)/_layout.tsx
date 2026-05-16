@@ -5,6 +5,7 @@ import { Tabs } from 'expo-router';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
+import { useLocationStore } from '@/stores/locationStore';
 
 function TabBarIcon(props: {
   name: React.ComponentProps<typeof FontAwesome>['name'];
@@ -15,16 +16,19 @@ function TabBarIcon(props: {
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+  const capturingParcel = useLocationStore((s) => s.isTracking || s.isPaused);
+
+  const baseTabBarStyle = {
+    backgroundColor: Colors[colorScheme ?? 'light'].background,
+    borderTopColor: colorScheme === 'dark' ? '#1a1f28' : '#c8d8e4',
+  };
 
   return (
     <Tabs
       screenOptions={{
         tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
         tabBarInactiveTintColor: Colors[colorScheme ?? 'light'].tabIconDefault,
-        tabBarStyle: {
-          backgroundColor: Colors[colorScheme ?? 'light'].background,
-          borderTopColor: colorScheme === 'dark' ? '#1a1f28' : '#c8d8e4',
-        },
+        tabBarStyle: capturingParcel ? { display: 'none', height: 0 } : baseTabBarStyle,
         headerShown: useClientOnlyValue(false, true),
       }}>
       <Tabs.Screen
