@@ -30,8 +30,21 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Explore',
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="map"
+        options={{
+          title: 'Map',
           tabBarIcon: ({ color }) => <TabBarIcon name="map" color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="territory"
+        options={{
+          title: 'Territory',
+          tabBarIcon: ({ color }) => <TabBarIcon name="flag" color={color} />,
         }}
       />
       <Tabs.Screen

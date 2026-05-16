@@ -1,11 +1,13 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { DMMono_400Regular } from '@expo-google-fonts/dm-mono';
+import { Rajdhani_400Regular, Rajdhani_600SemiBold, Rajdhani_700Bold } from '@expo-google-fonts/rajdhani';
 import { Syne_400Regular, Syne_800ExtraBold, useFonts } from '@expo-google-fonts/syne';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import 'react-native-reanimated';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import '../global.css';
 
@@ -24,6 +26,9 @@ export default function RootLayout() {
     Syne_400Regular,
     Syne_800ExtraBold,
     DMMono_400Regular,
+    Rajdhani_400Regular,
+    Rajdhani_600SemiBold,
+    Rajdhani_700Bold,
     ...FontAwesome.font,
   });
 
@@ -69,12 +74,14 @@ function RootLayoutNav() {
         };
 
   return (
-    <ThemeProvider value={navigationTheme}>
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(auth)" />
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="tracking" />
-      </Stack>
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider value={navigationTheme}>
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="(auth)" />
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="tracking" />
+        </Stack>
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }
