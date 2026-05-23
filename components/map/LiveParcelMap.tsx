@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import * as Location from 'expo-location';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -27,6 +27,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CARTO_DARK_TILE_TEMPLATE, MAP_TILE_ATTRIBUTION } from '@/constants/mapTiles';
 import { useRealtimeTracking } from '@/hooks/useRealtimeTracking';
 import {
+  coordFromLocation,
+  isAcceptableGpsAccuracy,
+  MAP_IDLE_WATCH_OPTIONS,
+  MAP_INITIAL_ACCURACY,
+} from '@/lib/mapLocation';
+import {
   buildPolygon,
   calculateArea,
   claimTerritory,
@@ -48,6 +54,12 @@ type TerritoryRow = {
   polygon: TerritoryPolygonJson;
   area_m2: number;
   claimed_at: string;
+};
+
+type StravaRouteRow = {
+  id: string;
+  sport_type: string | null;
+  route_latlng: [number, number][] | null;
 };
 
 const BG = '#0e0e10';
@@ -93,15 +105,6 @@ function ringToMapCoords(ring: [number, number][]) {
     }
   }
   return coords;
-}
-
-/** Closed ring for dashed outline Polyline */
-function closeLatLngRing(coords: { latitude: number; longitude: number }[]) {
-  if (coords.length < 2) return coords;
-  const a = coords[0];
-  const b = coords[coords.length - 1];
-  if (a.latitude === b.latitude && a.longitude === b.longitude) return coords;
-  return [...coords, { ...a }];
 }
 
 function ParcelLogoMark() {
@@ -176,6 +179,7 @@ export function LiveParcelMap({ autoStartTracking = false, activityLabel }: Live
   const setActiveTerritory = useLocationStore((s) => s.setActiveTerritory);
 
   const [territories, setTerritories] = useState<TerritoryRow[]>([]);
+  const [stravaRoutes, setStravaRoutes] = useState<StravaRouteRow[]>([]);
   const [loadingTerritories, setLoadingTerritories] = useState(true);
   const [claimBusy, setClaimBusy] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -192,6 +196,27 @@ export function LiveParcelMap({ autoStartTracking = false, activityLabel }: Live
   const prevSpeedSampleRef = useRef<{ c: { lat: number; lng: number }; t: number } | null>(null);
 
   const [activityTab, setActivityTab] = useState<ActivityTab>('running');
+
+  const loadStravaRoutes = useCallback(async (uid: string | null) => {
+    if (!isSupabaseConfigured || !uid) {
+      setStravaRoutes([]);
+      return;
+    }
+    const { data, error } = await supabase
+      .from('strava_activities')
+      .select('id, sport_type, route_latlng')
+      .eq('user_id', uid)
+      .not('route_latlng', 'is', null)
+      .order('start_date', { ascending: false })
+      .limit(8);
+
+    if (error) {
+      if (__DEV__) console.warn('[map] strava routes fetch', error.message);
+      setStravaRoutes([]);
+      return;
+    }
+    setStravaRoutes((data ?? []) as StravaRouteRow[]);
+  }, []);
 
   const loadTerritories = useCallback(async () => {
     if (!isSupabaseConfigured) {
@@ -225,9 +250,21 @@ export function LiveParcelMap({ autoStartTracking = false, activityLabel }: Live
   useEffect(() => {
     void loadTerritories();
     void supabase.auth.getSession().then(({ data }) => {
-      setUserId(data.session?.user?.id ?? null);
+      const uid = data.session?.user?.id ?? null;
+      setUserId(uid);
+      void loadStravaRoutes(uid);
     });
-  }, [loadTerritories]);
+  }, [loadTerritories, loadStravaRoutes]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void supabase.auth.getSession().then(({ data }) => {
+        const uid = data.session?.user?.id ?? null;
+        setUserId(uid);
+        void loadStravaRoutes(uid);
+      });
+    }, [loadStravaRoutes])
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -255,20 +292,29 @@ export function LiveParcelMap({ autoStartTracking = false, activityLabel }: Live
 
         let lat: number | undefined;
         let lng: number | undefined;
+        let accuracyM: number | null = null;
 
         try {
           const fix = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
+            accuracy: MAP_INITIAL_ACCURACY,
           });
-          lat = fix.coords.latitude;
-          lng = fix.coords.longitude;
-          setGpsAccuracyM(fix.coords.accuracy ?? null);
+          accuracyM = fix.coords.accuracy ?? null;
+          setGpsAccuracyM(accuracyM);
+          const coord = coordFromLocation(fix);
+          if (coord) {
+            lat = coord.lat;
+            lng = coord.lng;
+          } else {
+            lat = fix.coords.latitude;
+            lng = fix.coords.longitude;
+          }
         } catch {
           const last = await Location.getLastKnownPositionAsync();
           if (last) {
             lat = last.coords.latitude;
             lng = last.coords.longitude;
-            setGpsAccuracyM(last.coords.accuracy ?? null);
+            accuracyM = last.coords.accuracy ?? null;
+            setGpsAccuracyM(accuracyM);
           }
         }
 
@@ -276,7 +322,7 @@ export function LiveParcelMap({ autoStartTracking = false, activityLabel }: Live
 
         if (lat != null && lng != null) {
           const region = coordsToRegion(lat, lng);
-          setHasRealFix(true);
+          setHasRealFix(isAcceptableGpsAccuracy(accuracyM));
           setMapRegion(region);
           useLocationStore.getState().setPosition({ lat, lng });
           requestAnimationFrame(() => {
@@ -311,25 +357,17 @@ export function LiveParcelMap({ autoStartTracking = false, activityLabel }: Live
     let sub: Location.LocationSubscription | undefined;
 
     (async () => {
-      sub = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.Balanced,
-          timeInterval: 4000,
-          distanceInterval: 12,
-        },
-        (loc) => {
-          const lat = loc.coords.latitude;
-          const lng = loc.coords.longitude;
-          const region = coordsToRegion(lat, lng);
-          setHasRealFix(true);
-          setMapRegion(region);
-          setGpsAccuracyM(loc.coords.accuracy ?? null);
-          useLocationStore.getState().setPosition({ lat, lng });
-          if (Platform.OS === 'android') {
-            mapRef.current?.animateToRegion(region, 500);
-          }
-        }
-      );
+      sub = await Location.watchPositionAsync(MAP_IDLE_WATCH_OPTIONS, (loc) => {
+        const accuracyM = loc.coords.accuracy ?? null;
+        setGpsAccuracyM(accuracyM);
+        const coord = coordFromLocation(loc);
+        if (!coord) return;
+
+        const region = coordsToRegion(coord.lat, coord.lng);
+        setHasRealFix(true);
+        setMapRegion(region);
+        useLocationStore.getState().setPosition(coord);
+      });
     })();
 
     return () => {
@@ -397,9 +435,13 @@ export function LiveParcelMap({ autoStartTracking = false, activityLabel }: Live
   }, [loopClosed, route, setActiveTerritory]);
 
   useEffect(() => {
-    if (!isTracking || !position || Platform.OS === 'ios') return;
-    mapRef.current?.animateToRegion(coordsToRegion(position.lat, position.lng), 450);
-  }, [position?.lat, position?.lng, isTracking]);
+    if (!isTracking || isPaused || !position) return;
+    // animateCamera moves the centre without resetting the user's pinch-zoom level
+    mapRef.current?.animateCamera(
+      { center: { latitude: position.lat, longitude: position.lng } },
+      { duration: 450 }
+    );
+  }, [position?.lat, position?.lng, isTracking, isPaused]);
 
   const cameraRegion = useMemo(() => {
     if (isTracking && position) return coordsToRegion(position.lat, position.lng);
@@ -411,64 +453,23 @@ export function LiveParcelMap({ autoStartTracking = false, activityLabel }: Live
     return Date.now() - sessionStartedAt;
   }, [isTracking, sessionStartedAt, tick]);
 
-  const mapCenter = useMemo(() => {
-    if (position) return position;
-    if (mapRegion) return { lat: mapRegion.latitude, lng: mapRegion.longitude };
-    return { lat: 37.7749, lng: -122.4194 };
-  }, [position, mapRegion]);
-
-  const decorGoldCoords = useMemo(() => {
-    const lat = mapCenter.lat;
-    const lng = mapCenter.lng;
-    const k = 0.0038;
-    return [
-      { latitude: lat + k * 0.15, longitude: lng - k * 1.25 },
-      { latitude: lat + k * 1.45, longitude: lng - k * 1.05 },
-      { latitude: lat + k * 1.55, longitude: lng + k * 0.85 },
-      { latitude: lat + k * 0.35, longitude: lng + k * 1.15 },
-      { latitude: lat - k * 0.95, longitude: lng + k * 0.95 },
-      { latitude: lat - k * 1.05, longitude: lng - k * 0.35 },
-    ];
-  }, [mapCenter.lat, mapCenter.lng]);
-
-  const decorPurpleCoords = useMemo(() => {
-    const lat = mapCenter.lat - 0.0022;
-    const lng = mapCenter.lng - 0.0035;
-    const k = 0.0019;
-    return [
-      { latitude: lat, longitude: lng },
-      { latitude: lat + k * 1.1, longitude: lng },
-      { latitude: lat + k * 1.1, longitude: lng + k * 1.25 },
-      { latitude: lat, longitude: lng + k * 1.25 },
-    ];
-  }, [mapCenter.lat, mapCenter.lng]);
-
-  const decorGoldCentroid = useMemo(() => {
-    let la = 0;
-    let ln = 0;
-    for (const c of decorGoldCoords) {
-      la += c.latitude;
-      ln += c.longitude;
+  const mapHeadline = useMemo(() => {
+    if (loopClosed) return 'claim it\nnow';
+    if (isPaused) return 'pick up\nyour line';
+    if (isTracking) {
+      if (activityTab === 'running') return 'run the\nmap';
+      if (activityTab === 'cycling') return 'ride the\ncity';
+      return 'walk the\nblock';
     }
-    const n = decorGoldCoords.length || 1;
-    return { latitude: la / n, longitude: ln / n };
-  }, [decorGoldCoords]);
-
-  const decorPurpleCentroid = useMemo(() => {
-    let la = 0;
-    let ln = 0;
-    for (const c of decorPurpleCoords) {
-      la += c.latitude;
-      ln += c.longitude;
-    }
-    const n = decorPurpleCoords.length || 1;
-    return { latitude: la / n, longitude: ln / n };
-  }, [decorPurpleCoords]);
+    if (activityTab === 'running') return 'own the\nstreets';
+    if (activityTab === 'cycling') return 'ride your\nterrain';
+    return 'stake your\nclaim';
+  }, [loopClosed, isPaused, isTracking, activityTab]);
 
   const rivalInfo = useMemo(() => {
     const entries = Object.entries(otherPlayers);
     if (!position || entries.length === 0) {
-      return { handle: '@nightowl', sub: '312 M - SE' };
+      return { handle: '—', sub: 'NO RIVALS NEARBY' };
     }
     const [rid, coord] = entries[0];
     const dM = routeDistanceMeters([position, coord]);
@@ -563,12 +564,22 @@ export function LiveParcelMap({ autoStartTracking = false, activityLabel }: Live
     else pauseTracking();
   };
 
-  const onLocate = () => {
-    const r = cameraRegion ?? mapRegion;
-    if (!r) return;
-    const lat = isTracking && position ? position.lat : r.latitude;
-    const lng = isTracking && position ? position.lng : r.longitude;
-    mapRef.current?.animateToRegion(coordsToRegion(lat, lng), 450);
+  const onLocate = async () => {
+    if (position) {
+      mapRef.current?.animateToRegion(coordsToRegion(position.lat, position.lng), 450);
+      return;
+    }
+    try {
+      const fix = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      mapRef.current?.animateToRegion(
+        coordsToRegion(fix.coords.latitude, fix.coords.longitude),
+        450
+      );
+    } catch {
+      // no-op — permissions already handled by the denied screen
+    }
   };
 
   const labelTiny = {
@@ -640,7 +651,7 @@ export function LiveParcelMap({ autoStartTracking = false, activityLabel }: Live
   return (
     <View style={{ flex: 1, backgroundColor: BG }}>
       {/* Header + notifications above map (not over the map) */}
-      <View style={{ paddingTop: Math.max(insets.top, 10), paddingHorizontal: 14, paddingBottom: 6 }}>
+      <View style={{ paddingTop: Math.max(insets.top, 8), paddingHorizontal: 14, paddingBottom: 4 }}>
         <View style={{ position: 'relative', minHeight: 42, justifyContent: 'center' }}>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -768,8 +779,8 @@ export function LiveParcelMap({ autoStartTracking = false, activityLabel }: Live
         </View>
       ) : null}
 
-      {/* Upper ~55% map — inset rounded field */}
-      <View style={{ flex: 11, backgroundColor: BG, paddingHorizontal: 12, paddingBottom: 6 }}>
+      {/* Upper map — larger flex now that tab header is gone */}
+      <View style={{ flex: 13, backgroundColor: BG, paddingHorizontal: 12, paddingBottom: 6 }}>
         <View
           collapsable={false}
           style={{
@@ -790,6 +801,9 @@ export function LiveParcelMap({ autoStartTracking = false, activityLabel }: Live
             followsUserLocation={false}
             rotateEnabled
             pitchEnabled={false}
+            zoomEnabled
+            scrollEnabled
+            zoomTapEnabled
             cacheEnabled
             moveOnMarkerPress={false}
             initialRegion={initialRegion}>
@@ -800,54 +814,21 @@ export function LiveParcelMap({ autoStartTracking = false, activityLabel }: Live
             shouldReplaceMapContent={Platform.OS === 'ios'}
           />
 
-          {showTerritoryLayer && (
-            <>
-              <Polygon
-                coordinates={decorGoldCoords}
-                strokeColor="rgba(245,197,24,0.15)"
-                strokeWidth={1}
-                fillColor="rgba(245,197,24,0.14)"
-              />
+          {stravaRoutes.map((activity) => {
+            const points = activity.route_latlng;
+            if (!points?.length) return null;
+            const coords = points.map(([lat, lng]) => ({ latitude: lat, longitude: lng }));
+            return (
               <Polyline
-                coordinates={closeLatLngRing(decorGoldCoords)}
-                strokeColor={AMBER}
-                strokeWidth={2}
-                lineDashPattern={[14, 10]}
+                key={activity.id}
+                coordinates={coords}
+                strokeColor="rgba(147,197,253,0.55)"
+                strokeWidth={3}
                 lineCap="round"
                 lineJoin="round"
               />
-              <Polygon
-                coordinates={decorPurpleCoords}
-                strokeColor="rgba(167,139,250,0.2)"
-                strokeWidth={1}
-                fillColor="rgba(167,139,250,0.12)"
-              />
-              <Polyline
-                coordinates={closeLatLngRing(decorPurpleCoords)}
-                strokeColor="#c4b5fd"
-                strokeWidth={2}
-                lineDashPattern={[14, 10]}
-                lineCap="round"
-                lineJoin="round"
-              />
-              <Marker coordinate={decorGoldCentroid} tracksViewChanges={false}>
-                <View style={{ alignItems: 'center' }}>
-                  <Text
-                    style={{
-                      color: 'rgba(245,197,24,0.72)',
-                      fontSize: 10,
-                      fontFamily: FONT_LABEL,
-                      letterSpacing: 1,
-                    }}>
-                    you - 3d
-                  </Text>
-                </View>
-              </Marker>
-              <Marker coordinate={decorPurpleCentroid} tracksViewChanges={false}>
-                <Text style={{ color: '#a5b4fc', fontSize: 10, fontFamily: FONT_LABEL }}>@kestrel</Text>
-              </Marker>
-            </>
-          )}
+            );
+          })}
 
           {showTerritoryLayer &&
             territories.map((t) => {
@@ -875,7 +856,10 @@ export function LiveParcelMap({ autoStartTracking = false, activityLabel }: Live
           )}
 
           {hasRealFix && position ? (
-            <Marker coordinate={{ latitude: position.lat, longitude: position.lng }} anchor={{ x: 0.5, y: 0.5 }}>
+            <Marker
+              coordinate={{ latitude: position.lat, longitude: position.lng }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              tracksViewChanges={false}>
               <View style={{ alignItems: 'center', justifyContent: 'center', width: 44, height: 44 }}>
                 <View
                   style={{
@@ -921,37 +905,6 @@ export function LiveParcelMap({ autoStartTracking = false, activityLabel }: Live
           ))}
         </MapView>
 
-        {/* Faint street labels */}
-        <View pointerEvents="none" style={{ position: 'absolute', left: '10%', top: '28%' }}>
-          <Text
-            style={{
-              color: 'rgba(255,255,255,0.11)',
-              fontSize: 9,
-              letterSpacing: 3,
-              transform: [{ rotate: '-90deg' }],
-              fontFamily: FONT_LABEL,
-            }}>
-            WARREN AVE
-          </Text>
-        </View>
-        <View pointerEvents="none" style={{ position: 'absolute', left: '42%', top: '38%' }}>
-          <Text style={{ color: 'rgba(255,255,255,0.1)', fontSize: 9, letterSpacing: 2.5, fontFamily: FONT_LABEL }}>
-            3RD AVE
-          </Text>
-        </View>
-        <View pointerEvents="none" style={{ position: 'absolute', right: '18%', top: '52%' }}>
-          <Text
-            style={{
-              color: 'rgba(255,255,255,0.1)',
-              fontSize: 9,
-              letterSpacing: 3,
-              transform: [{ rotate: '-90deg' }],
-              fontFamily: FONT_LABEL,
-            }}>
-            5TH AVE
-          </Text>
-        </View>
-
         {/* Map float controls */}
         <View
           pointerEvents="box-none"
@@ -971,7 +924,7 @@ export function LiveParcelMap({ autoStartTracking = false, activityLabel }: Live
             <MaterialCommunityIcons name="layers-triple-outline" size={19} color={showTerritoryLayer ? AMBER : 'rgba(255,255,255,0.4)'} />
           </Pressable>
           <Pressable
-            onPress={onLocate}
+            onPress={() => void onLocate()}
             style={{
               width: 46,
               height: 46,
@@ -1087,10 +1040,10 @@ export function LiveParcelMap({ autoStartTracking = false, activityLabel }: Live
         </View>
       </View>
 
-      {/* Bottom card ~45% */}
+      {/* Bottom HUD */}
       <View
         style={{
-          flex: 9,
+          flex: 8,
           backgroundColor: CARD,
           borderTopLeftRadius: 26,
           borderTopRightRadius: 26,
@@ -1122,7 +1075,7 @@ export function LiveParcelMap({ autoStartTracking = false, activityLabel }: Live
                 letterSpacing: -0.5,
                 textTransform: 'lowercase',
               }}>
-              carve{'\n'}your line
+              {mapHeadline}
             </Text>
           </View>
           <View style={{ alignItems: 'flex-end', maxWidth: '42%' }}>
@@ -1241,11 +1194,22 @@ export function LiveParcelMap({ autoStartTracking = false, activityLabel }: Live
           </Pressable>
         </View>
 
-        {isTracking ? (
+        {(isTracking || isPaused) ? (
           <Pressable
             onPress={() => void stopTracking()}
-            style={{ alignSelf: 'center', marginTop: 14, paddingVertical: 8, paddingHorizontal: 20 }}>
-            <Text style={{ fontFamily: FONT_LABEL, fontSize: 12, letterSpacing: 2, color: '#f87171' }}>STOP</Text>
+            style={{
+              alignSelf: 'center',
+              marginTop: 14,
+              paddingVertical: 10,
+              paddingHorizontal: 28,
+              borderRadius: 10,
+              borderWidth: 1,
+              borderColor: 'rgba(248,113,113,0.4)',
+              backgroundColor: 'rgba(248,113,113,0.08)',
+            }}>
+            <Text style={{ fontFamily: FONT_LABEL, fontSize: 13, letterSpacing: 2, color: '#f87171', fontWeight: '700' }}>
+              END SESSION
+            </Text>
           </Pressable>
         ) : null}
 

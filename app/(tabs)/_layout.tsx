@@ -1,84 +1,29 @@
-import React from 'react';
-import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Tabs } from 'expo-router';
+import { View } from 'react-native';
 
-import Colors from '@/constants/Colors';
-import { useColorScheme } from '@/components/useColorScheme';
-import { useClientOnlyValue } from '@/components/useClientOnlyValue';
+import { NavSheet } from '@/components/NavSheet';
 import { useLocationStore } from '@/stores/locationStore';
 
-function TabBarIcon(props: {
-  name: React.ComponentProps<typeof FontAwesome>['name'];
-  color: string;
-}) {
-  return <FontAwesome size={22} style={{ marginBottom: -2 }} {...props} />;
-}
-
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
   const capturingParcel = useLocationStore((s) => s.isTracking || s.isPaused);
 
-  const baseTabBarStyle = {
-    backgroundColor: Colors[colorScheme ?? 'light'].background,
-    borderTopColor: colorScheme === 'dark' ? '#1a1f28' : '#c8d8e4',
-  };
-
   return (
-    <Tabs
-      screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
-        tabBarInactiveTintColor: Colors[colorScheme ?? 'light'].tabIconDefault,
-        tabBarStyle: capturingParcel ? { display: 'none', height: 0 } : baseTabBarStyle,
-        headerShown: useClientOnlyValue(false, true),
-      }}>
-      <Tabs.Screen
-        name="index"
-        options={{
-          href: null,
-        }}
-      />
-      <Tabs.Screen
-        name="map"
-        options={{
-          title: 'Map',
-          tabBarIcon: ({ color }) => <TabBarIcon name="map" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="territory"
-        options={{
-          title: 'Territory',
-          tabBarIcon: ({ color }) => <TabBarIcon name="flag" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="track"
-        options={{
-          title: 'Track',
-          tabBarIcon: ({ color }) => <TabBarIcon name="location-arrow" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'Profile',
-          tabBarIcon: ({ color }) => <TabBarIcon name="user" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="leaderboard"
-        options={{
-          title: 'Leaderboard',
-          tabBarIcon: ({ color }) => <TabBarIcon name="trophy" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="group"
-        options={{
-          title: 'Group',
-          tabBarIcon: ({ color }) => <TabBarIcon name="users" color={color} />,
-        }}
-      />
-    </Tabs>
+    <View style={{ flex: 1 }}>
+      <Tabs
+        screenOptions={{
+          tabBarStyle: { display: 'none' },
+          headerShown: false,
+        }}>
+        <Tabs.Screen name="index" options={{ href: null }} />
+        <Tabs.Screen name="map" />
+        <Tabs.Screen name="territory" />
+        <Tabs.Screen name="track" />
+        <Tabs.Screen name="profile" />
+        <Tabs.Screen name="leaderboard" />
+        <Tabs.Screen name="group" />
+      </Tabs>
+
+      {!capturingParcel && <NavSheet />}
+    </View>
   );
 }

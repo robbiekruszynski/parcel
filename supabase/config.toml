@@ -1,0 +1,26 @@
+[functions.strava-webhook]
+verify_jwt = false
+
+[functions.strava-oauth-callback]
+verify_jwt = false
+
+[functions.strava-sign-in]
+verify_jwt = false
+
+[functions.strava-token-exchange]
+verify_jwt = false
+
+[functions.claim-parcel]
+verify_jwt = true
+
+[functions.contest-parcel]
+verify_jwt = true
+
+[functions.speed-check]
+verify_jwt = true
+
+[functions.tick-points]
+verify_jwt = false
+
+[functions.group-treasury]
+verify_jwt = true

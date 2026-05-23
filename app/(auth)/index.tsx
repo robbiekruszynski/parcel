@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { Platform, Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
 export default function HeroScreen() {
   return (
@@ -21,15 +21,13 @@ export default function HeroScreen() {
       <Pressable
         className="mb-3 w-full max-w-sm rounded-xl bg-white py-4"
         onPress={() => router.push('/(auth)/sign-in')}>
-        <Text className="text-center text-base font-semibold text-parcel-bg-dark">
-          {Platform.OS === 'ios' ? 'Continue with Apple' : 'Continue with Apple'}
-        </Text>
+        <Text className="text-center text-base font-semibold text-parcel-bg-dark">Sign in</Text>
       </Pressable>
 
       <Pressable
         className="w-full max-w-sm rounded-xl border border-white/25 bg-transparent py-4"
-        onPress={() => router.push('/(auth)/sign-in')}>
-        <Text className="text-center text-base font-semibold text-white">Continue with Google</Text>
+        onPress={() => router.push('/(auth)/register')}>
+        <Text className="text-center text-base font-semibold text-white">Create account</Text>
       </Pressable>
     </View>
   );

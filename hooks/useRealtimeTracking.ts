@@ -2,6 +2,10 @@ import * as Location from 'expo-location';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import {
+  coordFromLocation,
+  MAP_TRACKING_WATCH_OPTIONS,
+} from '@/lib/mapLocation';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { useLocationStore } from '@/stores/locationStore';
 
@@ -21,24 +25,10 @@ export function useRealtimeTracking() {
     watchRef.current?.remove();
 
     watchRef.current = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.BestForNavigation,
-        timeInterval: 2000,
-        distanceInterval: 3,
-      },
+      MAP_TRACKING_WATCH_OPTIONS,
       async (loc) => {
-        const acc = loc.coords.accuracy;
-        if (acc != null && acc > 45) {
-          if (__DEV__) {
-            console.warn('[useRealtimeTracking] skipped fix, accuracy (m):', acc);
-          }
-          return;
-        }
-
-        const coord = {
-          lat: loc.coords.latitude,
-          lng: loc.coords.longitude,
-        };
+        const coord = coordFromLocation(loc);
+        if (!coord) return;
 
         useLocationStore.getState().setPosition(coord);
         useLocationStore.getState().appendRoute(coord);

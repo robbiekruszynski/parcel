@@ -12,6 +12,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import '../global.css';
 
+import { AuthProvider } from '@/components/AuthProvider';
 import { useColorScheme } from '@/components/useColorScheme';
 
 export { ErrorBoundary } from 'expo-router';
@@ -77,14 +78,18 @@ function RootLayoutNav() {
 
   return (
     <SafeAreaProvider>
-      <ThemeProvider value={navigationTheme}>
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(auth)" />
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="tracking" />
-          <Stack.Screen name="settings" />
-        </Stack>
-      </ThemeProvider>
+      <AuthProvider>
+        <ThemeProvider value={navigationTheme}>
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(auth)" />
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="tracking" />
+            <Stack.Screen name="settings" />
+            <Stack.Screen name="strava-auth" />
+            <Stack.Screen name="auth/callback" />
+          </Stack>
+        </ThemeProvider>
+      </AuthProvider>
     </SafeAreaProvider>
   );
 }

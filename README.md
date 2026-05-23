@@ -50,11 +50,111 @@ npx expo start
 
 Then open **Expo Go** on a device (QR), press **`i`** / **`a`** for simulators, or **`w`** for web (native-only features may be limited).
 
-Copy `.env.example` → `.env` and fill Supabase and Maps keys when you connect real services:
+---
 
-- `EXPO_PUBLIC_SUPABASE_URL`
-- `EXPO_PUBLIC_SUPABASE_ANON_KEY`
-- `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` (especially for Android map tiles)
+## Supabase setup
+
+Tracking, territory claims, and live sync require a Supabase project.
+
+### 1. Create a project
+
+In [supabase.com/dashboard](https://supabase.com/dashboard), create a new project and wait for the database to finish provisioning.
+
+### 2. Run the database schema
+
+Open **SQL Editor → New query**, paste the contents of [`supabase/setup.sql`](supabase/setup.sql) (copy from the raw file in your editor, not from a markdown preview), and **Run**. This creates profiles, live GPS (`locations`), territories, RLS policies, a sign-up profile trigger, and Realtime on `locations`.
+
+### 3. Enable email auth (local dev)
+
+**Authentication → Providers → Email** — keep Email enabled.
+
+For frictionless local testing, turn **off** “Confirm email” under Email provider settings. Otherwise new accounts must confirm via email before they can sign in.
+
+### 4. Copy API keys into `.env`
+
+Copy `.env.example` → `.env` and fill in values from **Project Settings → API**:
+
+| Variable | Where to find it |
+|----------|------------------|
+| `EXPO_PUBLIC_SUPABASE_URL` | Project URL |
+| `EXPO_PUBLIC_SUPABASE_ANON_KEY` | `anon` `public` key |
+| `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` | Google Cloud Console (Android map tiles) |
+
+Restart Expo after changing env vars:
+
+```bash
+npx expo start --clear
+```
+
+### 5. Create an account in the app
+
+Launch the app → **Create account** → pick an activity on **Track** → move outdoors on a **physical device** for accurate GPS.
+
+---
+
+## Strava integration
+
+Connect Strava in **Settings** (when signed in with email) or use **Continue with Strava** on the welcome screen. Both use the same Strava app configuration below.
+
+### 1. Register a Strava API application
+
+Go to [strava.com/settings/api](https://www.strava.com/settings/api):
+
+- **Application Name:** parcel
+- **Category:** Other
+- **Authorization Callback Domain:** your Supabase project host (e.g. `YOUR_PROJECT_REF.supabase.co`)
+
+Copy **Client ID** → `EXPO_PUBLIC_STRAVA_CLIENT_ID` in `.env`.
+
+Copy **Client Secret** → Supabase Edge Function secret only (never `EXPO_PUBLIC_`).
+
+### 2. Run Strava migrations (if you already ran `setup.sql` before Strava was added)
+
+Paste and run these in the SQL editor:
+
+- [`supabase/migrations/002_strava_connections.sql`](supabase/migrations/002_strava_connections.sql)
+- [`supabase/migrations/003_strava_activities.sql`](supabase/migrations/003_strava_activities.sql)
+
+Fresh installs: `setup.sql` already includes these tables.
+
+### 3. Set Edge Function secrets
+
+In **Project Settings → Edge Functions → Secrets** (or via CLI):
+
+```bash
+supabase secrets set STRAVA_CLIENT_ID=your_client_id
+supabase secrets set STRAVA_CLIENT_SECRET=your_client_secret
+supabase secrets set STRAVA_WEBHOOK_VERIFY_TOKEN=your_random_verify_token
+```
+
+`SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` are injected automatically by Supabase.
+
+### 4. Deploy Edge Functions
+
+```bash
+supabase functions deploy strava-oauth-callback
+supabase functions deploy strava-sign-in
+supabase functions deploy strava-token-exchange
+supabase functions deploy strava-webhook
+```
+
+`strava-webhook` is configured with `verify_jwt = false` in [`supabase/config.toml`](supabase/config.toml) so Strava can reach it without auth headers.
+
+### 5. Register the Strava webhook
+
+After deploying `strava-webhook`:
+
+```bash
+curl -X POST https://www.strava.com/api/v3/push_subscriptions \
+  -F client_id=YOUR_CLIENT_ID \
+  -F client_secret=YOUR_CLIENT_SECRET \
+  -F callback_url=https://YOUR_PROJECT_REF.supabase.co/functions/v1/strava-webhook \
+  -F verify_token=YOUR_VERIFY_TOKEN
+```
+
+### 6. Connect in the app
+
+Restart Expo (`npx expo start --clear`), open **Settings → Connect Strava**, complete OAuth. When you finish a Strava activity, the webhook stores the GPS route in `strava_activities` with `territory_hits` populated.
 
 ---
 
