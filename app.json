@@ -41,11 +41,6 @@
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_LOCATION"
       ],
-      "config": {
-        "googleMaps": {
-          "apiKey": ""
-        }
-      }
     },
     "web": {
       "bundler": "metro",

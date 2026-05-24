@@ -3,17 +3,27 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   FlatList,
+  LayoutAnimation,
+  Platform,
+  Pressable,
   RefreshControl,
   SafeAreaView,
   StyleSheet,
   Text,
+  UIManager,
   View,
 } from 'react-native';
 
-import { formatAreaM2 } from '@/lib/parcelGeometry';
+import { formatAreaM2, formatDistanceM } from '@/lib/parcelGeometry';
 import { supabase } from '@/lib/supabase';
 import { type Parcel } from '@/stores/parcelStore';
+
+// Enable LayoutAnimation on Android
+if (Platform.OS === 'android') {
+  UIManager.setLayoutAnimationEnabledExperimental?.(true);
+}
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -46,6 +56,29 @@ function rowToParcel(row: ParcelRow): Parcel {
   };
 }
 
+/** Haversine distance in metres between two [lat, lng] pairs. */
+function haversine(a: [number, number], b: [number, number]): number {
+  const R = 6_371_000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b[0] - a[0]);
+  const dLng = toRad(b[1] - a[1]);
+  const sinLat = Math.sin(dLat / 2);
+  const sinLng = Math.sin(dLng / 2);
+  const c =
+    sinLat * sinLat +
+    Math.cos(toRad(a[0])) * Math.cos(toRad(b[0])) * sinLng * sinLng;
+  return R * 2 * Math.atan2(Math.sqrt(c), Math.sqrt(1 - c));
+}
+
+function routeDistance(coords: [number, number][]): number {
+  if (coords.length < 2) return 0;
+  let d = 0;
+  for (let i = 1; i < coords.length; i++) {
+    d += haversine(coords[i - 1], coords[i]);
+  }
+  return d;
+}
+
 type ActivityIconName =
   | 'walk'
   | 'run'
@@ -55,11 +88,11 @@ type ActivityIconName =
 
 function activityIcon(activity: string): ActivityIconName {
   switch (activity) {
-    case 'walking':      return 'walk';
-    case 'running':      return 'run';
-    case 'cycling':      return 'bike';
+    case 'walking':       return 'walk';
+    case 'running':       return 'run';
+    case 'cycling':       return 'bike';
     case 'rollerblading': return 'rollerblade';
-    default:             return 'map-marker-path';
+    default:              return 'map-marker-path';
   }
 }
 
@@ -81,14 +114,46 @@ function formatDate(iso: string): string {
   });
 }
 
+function formatTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+
+// ─── Expanded detail row ───────────────────────────────────────────────────────
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={styles.detailValue}>{value}</Text>
+    </View>
+  );
+}
+
 // ─── Parcel Card ───────────────────────────────────────────────────────────────
 
-function ParcelCard({ parcel, mine }: { parcel: Parcel; mine: boolean }) {
+function ParcelCard({
+  parcel,
+  mine,
+  expanded,
+  onToggle,
+}: {
+  parcel: Parcel;
+  mine: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
   const username = parcel.owner_username ? `@${parcel.owner_username}` : '@unknown';
   const icon = activityIcon(parcel.activity);
+  const distance = routeDistance(parcel.coordinates as [number, number][]);
 
   return (
-    <View style={[styles.card, mine && styles.cardMine]}>
+    <Pressable
+      onPress={onToggle}
+      style={[styles.card, mine && styles.cardMine]}>
       {/* Colour swatch */}
       <View style={[styles.swatch, { backgroundColor: parcel.color }]} />
 
@@ -109,6 +174,11 @@ function ParcelCard({ parcel, mine }: { parcel: Parcel; mine: boolean }) {
             />
             <Text style={styles.activityText}>{activityLabel(parcel.activity)}</Text>
           </View>
+          <MaterialCommunityIcons
+            name={expanded ? 'chevron-up' : 'chevron-down'}
+            size={16}
+            color="rgba(255,255,255,0.3)"
+          />
         </View>
 
         {/* Bottom row: area | pts | date */}
@@ -117,8 +187,38 @@ function ParcelCard({ parcel, mine }: { parcel: Parcel; mine: boolean }) {
           <Text style={styles.pointsText}>{parcel.points} pts</Text>
           <Text style={styles.dateText}>{formatDate(parcel.claimed_at)}</Text>
         </View>
+
+        {/* Expanded details */}
+        {expanded && (
+          <View style={styles.expandedSection}>
+            <View style={styles.expandedDivider} />
+            <DetailRow
+              label="CLAIMED AT"
+              value={`${formatDate(parcel.claimed_at)} · ${formatTime(parcel.claimed_at)}`}
+            />
+            <DetailRow
+              label="DISTANCE"
+              value={distance > 0 ? formatDistanceM(distance) : '—'}
+            />
+            <DetailRow
+              label="AREA"
+              value={formatAreaM2(parcel.area_sqm)}
+            />
+            <DetailRow
+              label="ACTIVITY"
+              value={activityLabel(parcel.activity)}
+            />
+            <DetailRow
+              label="POINTS"
+              value={`${parcel.points} pts (ticking every 5 min)`}
+            />
+            {parcel.owner_display_name ? (
+              <DetailRow label="OWNER" value={parcel.owner_display_name} />
+            ) : null}
+          </View>
+        )}
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -138,6 +238,7 @@ export default function TerritoryScreen() {
   const [allParcels, setAllParcels] = useState<Parcel[]>([]);
   const [loading, setLoading] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -173,6 +274,11 @@ export default function TerritoryScreen() {
     }, [load])
   );
 
+  const toggle = (id: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpandedId((prev) => (prev === id ? null : id));
+  };
+
   const myParcels = allParcels.filter((p) => p.owner_id === userId);
 
   if (loading && allParcels.length === 0) {
@@ -206,7 +312,13 @@ export default function TerritoryScreen() {
               </Text>
             ) : (
               myParcels.map((p) => (
-                <ParcelCard key={`mine-${p.id}`} parcel={p} mine />
+                <ParcelCard
+                  key={`mine-${p.id}`}
+                  parcel={p}
+                  mine
+                  expanded={expandedId === p.id}
+                  onToggle={() => toggle(p.id)}
+                />
               ))
             )}
 
@@ -218,7 +330,12 @@ export default function TerritoryScreen() {
           <Text style={styles.emptyText}>No parcels claimed yet.</Text>
         }
         renderItem={({ item }) => (
-          <ParcelCard parcel={item} mine={item.owner_id === userId} />
+          <ParcelCard
+            parcel={item}
+            mine={item.owner_id === userId}
+            expanded={expandedId === item.id}
+            onToggle={() => toggle(item.id)}
+          />
         )}
       />
     </SafeAreaView>
@@ -319,6 +436,36 @@ const styles = StyleSheet.create({
     fontFamily: 'Rajdhani_600SemiBold',
     fontSize: 11,
     color: '#6b7280',
+  },
+
+  // Expanded section
+  expandedSection: {
+    marginTop: 8,
+  },
+  expandedDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    marginBottom: 10,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  detailLabel: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 10,
+    letterSpacing: 1.5,
+    color: 'rgba(255,255,255,0.35)',
+    textTransform: 'uppercase',
+  },
+  detailValue: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.75)',
+    textAlign: 'right',
+    flex: 1,
+    marginLeft: 16,
   },
 
   // Empty state

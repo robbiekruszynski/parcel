@@ -78,6 +78,40 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     try { return calculateAreaM2(route); } catch { return null; }
   }, [loopClosed, route]);
 
+  // ── Realtime: pick up new parcels from other users ────────────────────────
+  useEffect(() => {
+    const channel = supabase
+      .channel('parcels-global-inserts')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'parcels' },
+        async (payload) => {
+          const newRow = payload.new as Partial<ParcelRow>;
+          if (!newRow.id) return;
+
+          // Re-fetch with profiles join (realtime payload lacks joined tables)
+          const { data } = await supabase
+            .from('parcels')
+            .select(`
+              id, owner_id, coordinates, area_sqm, claimed_at,
+              color, points, activity,
+              profiles ( username, display_name )
+            `)
+            .eq('id', newRow.id)
+            .single();
+
+          if (data) {
+            useParcelStore.getState().addParcel(
+              rowToParcel(data as unknown as ParcelRow)
+            );
+          }
+        }
+      )
+      .subscribe();
+
+    return () => { void supabase.removeChannel(channel); };
+  }, []);
+
   // ── Load all parcels on mount ──────────────────────────────────────────────
   const loadParcels = useCallback(async () => {
     useParcelStore.getState().setLoading(true);
@@ -128,7 +162,7 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     const coordinates  = routeToLatLngPairs(route);
     const area_sqm     = calculateAreaM2(route);
     const color        = userParcelColor(uid);
-    const initialPoints = Math.min(500, Math.max(1, Math.round(area_sqm / 50)));
+    const initialPoints = Math.max(1, Math.round(area_sqm / 50));
 
     const { data, error } = await supabase
       .from('parcels')

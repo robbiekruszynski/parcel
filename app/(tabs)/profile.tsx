@@ -1,9 +1,12 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
+  Pressable,
   RefreshControl,
   SafeAreaView,
   StyleSheet,
@@ -11,6 +14,8 @@ import {
   View,
 } from 'react-native';
 
+import { useAuth } from '@/components/AuthProvider';
+import { StravaConnectButton } from '@/components/StravaConnectButton';
 import { formatAreaM2 } from '@/lib/parcelGeometry';
 import { supabase } from '@/lib/supabase';
 
@@ -87,10 +92,7 @@ function ParcelCard({ parcel }: { parcel: UserParcel }) {
     <View style={styles.card}>
       <View style={[styles.swatch, { backgroundColor: parcel.color }]} />
       <View style={styles.cardBody}>
-        {/* Area */}
         <Text style={styles.areaText}>{formatAreaM2(parcel.area_sqm)}</Text>
-
-        {/* Activity + points row */}
         <View style={styles.cardRow}>
           <MaterialCommunityIcons
             name={icon}
@@ -101,10 +103,47 @@ function ParcelCard({ parcel }: { parcel: UserParcel }) {
           <Text style={styles.activityText}>{activityLabel(parcel.activity)}</Text>
           <Text style={styles.pointsText}>{parcel.points} pts</Text>
         </View>
-
-        {/* Date */}
         <Text style={styles.dateText}>{formatDate(parcel.claimed_at)}</Text>
       </View>
+    </View>
+  );
+}
+
+// ─── Settings footer ───────────────────────────────────────────────────────────
+
+function SettingsFooter({ onSignOut }: { onSignOut: () => void }) {
+  return (
+    <View style={styles.settingsSection}>
+      {/* Section label */}
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionHeaderText}>SETTINGS</Text>
+      </View>
+
+      {/* Strava connect */}
+      <View style={styles.settingsGroup}>
+        <View style={styles.settingsRow}>
+          <FontAwesome name="heartbeat" size={16} color="#fb923c" style={{ marginRight: 10 }} />
+          <Text style={styles.settingsRowLabel}>Strava</Text>
+        </View>
+        <View style={{ marginTop: 10 }}>
+          <StravaConnectButton />
+        </View>
+      </View>
+
+      {/* More settings link */}
+      <Pressable
+        style={styles.settingsLinkRow}
+        onPress={() => router.push('/settings')}>
+        <FontAwesome name="sliders" size={15} color="rgba(255,255,255,0.5)" style={{ marginRight: 10 }} />
+        <Text style={styles.settingsLinkText}>More settings</Text>
+        <FontAwesome name="chevron-right" size={12} color="rgba(255,255,255,0.2)" style={{ marginLeft: 'auto' }} />
+      </Pressable>
+
+      {/* Sign out */}
+      <Pressable style={styles.signOutBtn} onPress={onSignOut}>
+        <FontAwesome name="sign-out" size={15} color="#ef4444" style={{ marginRight: 10 }} />
+        <Text style={styles.signOutText}>Sign out</Text>
+      </Pressable>
     </View>
   );
 }
@@ -112,6 +151,7 @@ function ParcelCard({ parcel }: { parcel: UserParcel }) {
 // ─── Screen ────────────────────────────────────────────────────────────────────
 
 export default function ProfileScreen() {
+  const { signOut } = useAuth();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [parcels, setParcels] = useState<UserParcel[]>([]);
   const [loading, setLoading] = useState(false);
@@ -119,10 +159,7 @@ export default function ProfileScreen() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
+      const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user?.id) {
         setProfile(null);
         setParcels([]);
@@ -161,10 +198,24 @@ export default function ProfileScreen() {
   }, []);
 
   useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load])
+    useCallback(() => { void load(); }, [load])
   );
+
+  const handleSignOut = () => {
+    Alert.alert('Sign out', 'Sign out of parcel on this device?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign out',
+        style: 'destructive',
+        onPress: () => {
+          void signOut().catch((e: unknown) => {
+            const msg = e instanceof Error ? e.message : 'Could not sign out';
+            Alert.alert('Sign out failed', msg);
+          });
+        },
+      },
+    ]);
+  };
 
   const displayUsername = profile?.username ? `@${profile.username}` : '@—';
   const displayName = profile?.display_name ?? '';
@@ -188,12 +239,9 @@ export default function ProfileScreen() {
           <>
             {/* ── Header ── */}
             <View style={styles.headerRow}>
-              {/* Avatar */}
               <View style={styles.avatar}>
                 <Text style={styles.avatarText}>{initials(profile)}</Text>
               </View>
-
-              {/* Name block */}
               <View style={styles.nameBlock}>
                 <Text style={styles.usernameText}>{displayUsername}</Text>
                 {displayName ? (
@@ -233,6 +281,7 @@ export default function ProfileScreen() {
             </Text>
           )
         }
+        ListFooterComponent={<SettingsFooter onSignOut={handleSignOut} />}
         renderItem={({ item }) => <ParcelCard parcel={item} />}
       />
     </SafeAreaView>
@@ -378,6 +427,58 @@ const styles = StyleSheet.create({
     fontFamily: 'Rajdhani_600SemiBold',
     fontSize: 11,
     color: '#6b7280',
+  },
+
+  // Settings section
+  settingsSection: {
+    marginTop: 28,
+  },
+  settingsGroup: {
+    backgroundColor: CARD_BG,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#ffffff0f',
+  },
+  settingsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  settingsRowLabel: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 14,
+    color: '#f3f4f6',
+  },
+  settingsLinkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: CARD_BG,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#ffffff0f',
+  },
+  settingsLinkText: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.55)',
+  },
+  signOutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.2)',
+    marginTop: 4,
+  },
+  signOutText: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 14,
+    color: '#ef4444',
   },
 
   // Empty state

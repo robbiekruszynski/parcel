@@ -22,6 +22,13 @@ export const MIN_PARCEL_POINTS = 5;
 /** Parcels smaller than this are rejected as noise. */
 export const MIN_PARCEL_AREA_M2 = 50;
 
+/**
+ * Minimum total route distance (metres) before loop-close detection activates.
+ * Prevents GPS jitter from immediately triggering a "closed loop" right after
+ * a claim resets the route while the user is still standing still.
+ */
+export const MIN_LOOP_DISTANCE_M = 100;
+
 // ─── Distance ─────────────────────────────────────────────────────────────────
 
 export function distanceBetween(a: Coord, b: Coord): number {
@@ -45,10 +52,12 @@ export function routeLengthMeters(route: Coord[]): number {
 
 /**
  * Returns true when the user has walked back within LOOP_CLOSE_THRESHOLD_M
- * of their starting point and there are enough points for a polygon.
+ * of their starting point, has enough points, and has covered enough distance
+ * that GPS jitter alone cannot trigger a false loop-close.
  */
 export function isLoopClosed(route: Coord[]): boolean {
   if (route.length < MIN_PARCEL_POINTS + 1) return false;
+  if (routeLengthMeters(route) < MIN_LOOP_DISTANCE_M) return false;
   return (
     distanceBetween(route[0], route[route.length - 1]) <= LOOP_CLOSE_THRESHOLD_M
   );
