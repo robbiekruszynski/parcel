@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 
-export type Coord = { lat: number; lng: number };
+/** A single GPS point. `ts` is Unix epoch ms — captured when the point is
+ *  appended during tracking. Required for GPX export to Strava. */
+export type Coord = { lat: number; lng: number; ts?: number };
 
 interface LocationState {
   position: Coord | null;
@@ -29,7 +31,7 @@ export const useLocationStore = create<LocationState>((set) => ({
   setPosition: (coord) => set({ position: coord }),
   appendRoute: (coord) =>
     set((s) => ({
-      route: [...s.route, coord],
+      route: [...s.route, { ...coord, ts: coord.ts ?? Date.now() }],
     })),
   setOtherPlayers: (players) => set({ otherPlayers: players }),
   setIsTracking: (isTracking) => set({ isTracking }),

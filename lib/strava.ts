@@ -1,7 +1,7 @@
 export const STRAVA_CLIENT_ID = process.env.EXPO_PUBLIC_STRAVA_CLIENT_ID ?? '';
 export const STRAVA_AUTH_URL = 'https://www.strava.com/oauth/mobile/authorize';
 export const STRAVA_TOKEN_URL = 'https://www.strava.com/oauth/token';
-export const STRAVA_SCOPES = 'read,activity:read_all';
+export const STRAVA_SCOPES = 'read,activity:read_all,activity:write';
 
 export interface StravaTokens {
   access_token: string;

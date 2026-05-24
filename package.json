@@ -16,6 +16,7 @@
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-navigation/native": "^7.1.8",
+    "@rnmapbox/maps": "^10.3.1",
     "@supabase/supabase-js": "^2.105.4",
     "@turf/area": "^7.3.5",
     "@turf/helpers": "^7.3.5",
