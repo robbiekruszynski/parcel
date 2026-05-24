@@ -8,6 +8,11 @@
     "scheme": "parcel",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "extra": {
+      "eas": {
+        "projectId": "7e8ebe75-10b6-4515-b1ac-028b209135fd"
+      }
+    },
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
