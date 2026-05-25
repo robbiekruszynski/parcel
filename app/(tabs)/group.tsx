@@ -28,6 +28,7 @@ import {
   View,
 } from 'react-native';
 
+import { PlayerProfileSheet } from '@/components/PlayerProfileSheet';
 import { supabase } from '@/lib/supabase';
 
 if (Platform.OS === 'android') {
@@ -44,6 +45,7 @@ interface GroupMember {
   points_total: number;
   parcel_count: number;
   role: string;
+  contribution_pct: number;
 }
 
 interface Group {
@@ -51,6 +53,7 @@ interface Group {
   name: string;
   invite_code: string | null;
   created_by: string;
+  pool_points: number;
   members: GroupMember[];
 }
 
@@ -66,9 +69,18 @@ function avatarInitials(name: string | null, username: string | null): string {
 
 // ─── Member row ───────────────────────────────────────────────────────────────
 
-function MemberRow({ member, isMe }: { member: GroupMember; isMe: boolean }) {
+function MemberRow({
+  member, isMe, onPress, onContributionChange,
+}: {
+  member: GroupMember;
+  isMe: boolean;
+  onPress: () => void;
+  onContributionChange?: (delta: number) => void;
+}) {
   return (
-    <View style={[styles.memberRow, isMe && styles.memberRowMe]}>
+    <Pressable
+      style={({ pressed }) => [styles.memberRow, isMe && styles.memberRowMe, pressed && { opacity: 0.75 }]}
+      onPress={onPress}>
       <View style={[styles.memberAvatar, isMe && styles.memberAvatarMe]}>
         <Text style={[styles.memberAvatarText, isMe && styles.memberAvatarTextMe]}>
           {avatarInitials(member.display_name, member.username)}
@@ -82,6 +94,26 @@ function MemberRow({ member, isMe }: { member: GroupMember; isMe: boolean }) {
         {member.display_name ? (
           <Text style={styles.memberDisplayName} numberOfLines={1}>{member.display_name}</Text>
         ) : null}
+        {/* Contribution stepper — only visible on your own row */}
+        {isMe && onContributionChange && (
+          <View style={styles.contributionRow}>
+            <Text style={styles.contributionLabel}>
+              Giving {member.contribution_pct}% to group
+            </Text>
+            <Pressable
+              style={styles.stepBtn}
+              onPress={(e) => { e.stopPropagation(); onContributionChange(-5); }}
+              disabled={member.contribution_pct <= 0}>
+              <Text style={[styles.stepTxt, member.contribution_pct <= 0 && { opacity: 0.3 }]}>−</Text>
+            </Pressable>
+            <Pressable
+              style={styles.stepBtn}
+              onPress={(e) => { e.stopPropagation(); onContributionChange(+5); }}
+              disabled={member.contribution_pct >= 100}>
+              <Text style={[styles.stepTxt, member.contribution_pct >= 100 && { opacity: 0.3 }]}>+</Text>
+            </Pressable>
+          </View>
+        )}
       </View>
       <View style={{ alignItems: 'flex-end' }}>
         <Text style={[styles.memberPts, isMe && { color: AMBER }]}>
@@ -89,7 +121,7 @@ function MemberRow({ member, isMe }: { member: GroupMember; isMe: boolean }) {
         </Text>
         <Text style={styles.memberParcels}>{member.parcel_count} parcels</Text>
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -102,6 +134,8 @@ function GroupCard({
   onToggle,
   onInvite,
   onLeave,
+  onMemberPress,
+  onContributionChange,
 }: {
   group: Group;
   myUserId: string | null;
@@ -109,8 +143,9 @@ function GroupCard({
   onToggle: () => void;
   onInvite: (groupId: string) => void;
   onLeave: (groupId: string, groupName: string) => void;
+  onMemberPress: (userId: string) => void;
+  onContributionChange: (groupId: string, userId: string, delta: number) => void;
 }) {
-  const totalPoints = group.members.reduce((s, m) => s + m.points_total, 0);
   const totalParcels = group.members.reduce((s, m) => s + m.parcel_count, 0);
 
   return (
@@ -119,13 +154,19 @@ function GroupCard({
         <View style={{ flex: 1 }}>
           <Text style={styles.groupName}>{group.name}</Text>
           <Text style={styles.groupMeta}>
-            {group.members.length} member{group.members.length !== 1 ? 's' : ''} · {totalPoints.toLocaleString()} pts · {totalParcels} parcels
+            {group.members.length} member{group.members.length !== 1 ? 's' : ''} · {totalParcels} parcels
           </Text>
+        </View>
+        {/* Group pool points — highlighted separately */}
+        <View style={styles.poolBadge}>
+          <Text style={styles.poolPts}>{group.pool_points.toLocaleString()}</Text>
+          <Text style={styles.poolLabel}>pool pts</Text>
         </View>
         <MaterialCommunityIcons
           name={expanded ? 'chevron-up' : 'chevron-down'}
           size={18}
           color="rgba(255,255,255,0.3)"
+          style={{ marginLeft: 8 }}
         />
       </Pressable>
 
@@ -134,7 +175,17 @@ function GroupCard({
           <View style={styles.expandedDivider} />
 
           {group.members.map((m) => (
-            <MemberRow key={m.user_id} member={m} isMe={m.user_id === myUserId} />
+            <MemberRow
+              key={m.user_id}
+              member={m}
+              isMe={m.user_id === myUserId}
+              onPress={() => onMemberPress(m.user_id)}
+              onContributionChange={
+                m.user_id === myUserId
+                  ? (delta) => onContributionChange(group.id, m.user_id, delta)
+                  : undefined
+              }
+            />
           ))}
 
           {/* Actions */}
@@ -171,6 +222,9 @@ export default function GroupScreen() {
   const [inviteUsername, setInviteUsername] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // Player profile sheet
+  const [profileUserId, setProfileUserId] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -189,18 +243,18 @@ export default function GroupScreen() {
 
       const groupIds = memberRows.map((r) => r.group_id);
 
-      // Group details
+      // Group details (include pool_points)
       const { data: groupRows } = await supabase
         .from('groups')
-        .select('id, name, invite_code, created_by')
+        .select('id, name, invite_code, created_by, points')
         .in('id', groupIds);
 
       if (!groupRows) { setGroups([]); return; }
 
-      // All members of those groups with profile data
+      // All members of those groups with profile data + contribution_pct
       const { data: allMembers } = await supabase
         .from('group_members')
-        .select('group_id, user_id, role, profiles(username, display_name, points_total)')
+        .select('group_id, user_id, role, contribution_pct, profiles(username, display_name, points_total)')
         .in('group_id', groupIds);
 
       // Parcel counts per user
@@ -214,21 +268,23 @@ export default function GroupScreen() {
       }
 
       const built: Group[] = groupRows.map((g) => ({
-        id: g.id,
-        name: g.name,
+        id:          g.id,
+        name:        g.name,
         invite_code: g.invite_code,
-        created_by: g.created_by,
+        created_by:  g.created_by,
+        pool_points: g.points ?? 0,
         members: (allMembers ?? [])
           .filter((m) => m.group_id === g.id)
           .map((m) => {
             const profile = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
             return {
-              user_id: m.user_id,
-              username: profile?.username ?? null,
-              display_name: profile?.display_name ?? null,
-              points_total: profile?.points_total ?? 0,
-              parcel_count: parcelCount[m.user_id] ?? 0,
-              role: m.role ?? 'member',
+              user_id:          m.user_id,
+              username:         profile?.username ?? null,
+              display_name:     profile?.display_name ?? null,
+              points_total:     profile?.points_total ?? 0,
+              parcel_count:     parcelCount[m.user_id] ?? 0,
+              role:             m.role ?? 'member',
+              contribution_pct: m.contribution_pct ?? 20,
             };
           }),
       }));
@@ -331,6 +387,36 @@ export default function GroupScreen() {
     }
   };
 
+  // ── Contribution % change ─────────────────────────────────────────────────
+  const handleContributionChange = async (groupId: string, userId: string, delta: number) => {
+    // Optimistic update
+    setGroups((prev) =>
+      prev.map((g) => {
+        if (g.id !== groupId) return g;
+        return {
+          ...g,
+          members: g.members.map((m) => {
+            if (m.user_id !== userId) return m;
+            const next = Math.max(0, Math.min(100, m.contribution_pct + delta));
+            return { ...m, contribution_pct: next };
+          }),
+        };
+      })
+    );
+
+    // Find new value after update
+    const group = groups.find((g) => g.id === groupId);
+    const member = group?.members.find((m) => m.user_id === userId);
+    if (!member) return;
+    const newPct = Math.max(0, Math.min(100, member.contribution_pct + delta));
+
+    await supabase
+      .from('group_members')
+      .update({ contribution_pct: newPct })
+      .eq('group_id', groupId)
+      .eq('user_id', userId);
+  };
+
   // ── Leave group ───────────────────────────────────────────────────────────
   const handleLeave = (groupId: string, groupName: string) => {
     Alert.alert(`Leave ${groupName}?`, 'You can rejoin later if someone invites you.', [
@@ -394,6 +480,8 @@ export default function GroupScreen() {
             onToggle={() => toggle(item.id)}
             onInvite={(id) => { setInviteGroupId(id); setInviteUsername(''); }}
             onLeave={handleLeave}
+            onMemberPress={(uid) => setProfileUserId(uid)}
+            onContributionChange={handleContributionChange}
           />
         )}
       />
@@ -422,6 +510,13 @@ export default function GroupScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* ── Player profile sheet ──────────────────────────────────────────── */}
+      <PlayerProfileSheet
+        userId={profileUserId}
+        myUserId={myUserId}
+        onClose={() => setProfileUserId(null)}
+      />
 
       {/* ── Invite modal ───────────────────────────────────────────────────── */}
       <Modal visible={!!inviteGroupId} transparent animationType="slide" onRequestClose={() => setInviteGroupId(null)}>
@@ -518,6 +613,23 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.4)',
     marginTop: 2,
   },
+  // Pool points badge
+  poolBadge: {
+    alignItems: 'flex-end',
+  },
+  poolPts: {
+    fontFamily: 'BarlowCondensed_900Black',
+    fontSize: 18,
+    color: '#a78bfa',
+    lineHeight: 21,
+  },
+  poolLabel: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 9,
+    letterSpacing: 1,
+    color: 'rgba(167,139,250,0.5)',
+  },
+
   groupExpanded: { paddingHorizontal: 16, paddingBottom: 14 },
   expandedDivider: {
     height: 1,
@@ -565,6 +677,36 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: 'rgba(255,255,255,0.35)',
   },
+  // Contribution % stepper
+  contributionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+  },
+  contributionLabel: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 11,
+    color: 'rgba(245,197,24,0.65)',
+    flex: 1,
+  },
+  stepBtn: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  stepTxt: {
+    fontFamily: 'BarlowCondensed_900Black',
+    fontSize: 14,
+    color: '#fff',
+    lineHeight: 17,
+  },
+
   memberPts: {
     fontFamily: 'BarlowCondensed_900Black',
     fontSize: 14,
