@@ -1,14 +1,14 @@
 /**
  * usePairing.ts
  *
- * Cooperative-pairing logic:
- *  - Realtime subscription on pair_requests table
- *    → incoming INSERT where to_user_id = me  → show request modal
- *    → incoming UPDATE where from_user_id = me → react to accepted / declined
- *  - sendPairRequest(username) — search profiles, insert pair_request row
- *  - acceptRequest(id)         — mark accepted, set pairedUser in store
- *  - declineRequest(id)        — mark declined, clear incomingRequest
- *  - cancelOutgoing()          — sender gives up waiting
+ * Cooperative-pairing logic supporting unlimited partners.
+ *  - Realtime on pair_requests:
+ *    INSERT where to_user_id = me  → show incoming request modal
+ *    UPDATE where from_user_id = me → accepted adds partner, declined removes pending
+ *  - sendPairRequest(username)  — look up + insert, add to pendingInvites
+ *  - acceptRequest(id)          — mark accepted, add sender as partner
+ *  - declineRequest(id)         — mark declined, clear incomingRequest
+ *  - cancelInvite(requestId)    — sender cancels a pending invite
  */
 
 import { useCallback, useEffect, useRef } from 'react';
@@ -32,12 +32,11 @@ interface PairRequestRow {
 export function usePairing() {
   const myUserIdRef = useRef<string | null>(null);
 
-  // ── Fetch current user on mount ───────────────────────────────────────────
+  // Fetch current user once
   useEffect(() => {
-    void (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+    void supabase.auth.getSession().then(({ data: { session } }) => {
       myUserIdRef.current = session?.user?.id ?? null;
-    })();
+    });
   }, []);
 
   // ── Realtime subscription ─────────────────────────────────────────────────
@@ -46,11 +45,8 @@ export function usePairing() {
       const row = payload.new;
       if (!row.id || !row.from_user_id) return;
       if (row.to_user_id !== myUserIdRef.current) return;
-
-      // Check it hasn't already expired
       if (row.expires_at && new Date(row.expires_at) < new Date()) return;
 
-      // Fetch sender's username
       const { data: profile } = await supabase
         .from('profiles')
         .select('username')
@@ -66,38 +62,27 @@ export function usePairing() {
 
     const handleUpdate = async (payload: { new: Partial<PairRequestRow> }) => {
       const row = payload.new;
-      if (!row.id || row.from_user_id !== myUserIdRef.current) return;
+      if (!row.id) return;
 
-      if (row.status === 'accepted') {
-        // Find out the accepting user's username
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('username')
-          .eq('id', row.to_user_id)
-          .single();
+      // My outgoing invite was accepted
+      if (row.from_user_id === myUserIdRef.current && row.status === 'accepted') {
+        const pending = usePairStore.getState().pendingInvites.find((i) => i.requestId === row.id);
+        usePairStore.getState().addPartner({
+          id:       row.to_user_id!,
+          username: pending?.toUsername ?? null,
+        });
+      }
 
-        const toUsername = usePairStore.getState().outgoingRequest?.toUsername
-          ?? profile?.username
-          ?? null;
-
-        usePairStore.getState().setPairedUser(row.to_user_id!, toUsername);
-      } else if (row.status === 'declined') {
-        usePairStore.getState().setOutgoingRequest(null);
+      // My outgoing invite was declined → remove from pending
+      if (row.from_user_id === myUserIdRef.current && row.status === 'declined') {
+        usePairStore.getState().removePendingInvite(row.id);
       }
     };
 
     const channel = supabase
       .channel('pair-requests-mine')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'pair_requests' },
-        handleInsert
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'pair_requests' },
-        handleUpdate
-      )
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'pair_requests' }, handleInsert)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'pair_requests' }, handleUpdate)
       .subscribe();
 
     return () => { void supabase.removeChannel(channel); };
@@ -108,44 +93,44 @@ export function usePairing() {
     const myId = myUserIdRef.current;
     if (!myId) throw new Error('Not signed in');
 
-    const cleanUsername = username.replace(/^@/, '').trim();
-    if (!cleanUsername) throw new Error('Enter a valid username');
+    const clean = username.replace(/^@/, '').trim();
+    if (!clean) throw new Error('Enter a valid username');
 
-    // Look up recipient
     const { data: profile, error: lookupErr } = await supabase
       .from('profiles')
       .select('id, username')
-      .eq('username', cleanUsername)
+      .eq('username', clean)
       .single();
 
-    if (lookupErr || !profile) throw new Error(`@${cleanUsername} not found`);
+    if (lookupErr || !profile) throw new Error(`@${clean} not found`);
     if (profile.id === myId) throw new Error("You can't pair with yourself");
 
-    // Insert pair_request
+    // Already a confirmed partner?
+    if (usePairStore.getState().partners.some((p) => p.id === profile.id)) {
+      throw new Error(`@${clean} is already in your group`);
+    }
+    // Already pending?
+    if (usePairStore.getState().pendingInvites.some((i) => i.toUserId === profile.id)) {
+      throw new Error(`Request already sent to @${clean}`);
+    }
+
     const { data: req, error: insertErr } = await supabase
       .from('pair_requests')
-      .insert({
-        from_user_id: myId,
-        to_user_id:   profile.id,
-        status:       'pending',
-      })
+      .insert({ from_user_id: myId, to_user_id: profile.id, status: 'pending' })
       .select('id')
       .single();
 
     if (insertErr || !req) throw new Error(insertErr?.message ?? 'Failed to send request');
 
-    usePairStore.getState().setOutgoingRequest({
-      id:         req.id,
+    usePairStore.getState().addPendingInvite({
+      requestId:  req.id,
       toUserId:   profile.id,
-      toUsername: profile.username ?? cleanUsername,
+      toUsername: profile.username ?? clean,
     });
 
-    // Auto-expire after 2 minutes if still pending
+    // Auto-expire after 2 minutes
     setTimeout(() => {
-      const { outgoingRequest } = usePairStore.getState();
-      if (outgoingRequest?.id === req.id) {
-        usePairStore.getState().setOutgoingRequest(null);
-      }
+      usePairStore.getState().removePendingInvite(req.id);
     }, 120_000);
   }, []);
 
@@ -155,13 +140,13 @@ export function usePairing() {
       .from('pair_requests')
       .update({ status: 'accepted' })
       .eq('id', requestId);
-
     if (error) throw new Error(error.message);
 
     const req = usePairStore.getState().incomingRequest;
     if (req) {
-      usePairStore.getState().setPairedUser(req.fromUserId, req.fromUsername);
+      usePairStore.getState().addPartner({ id: req.fromUserId, username: req.fromUsername });
     }
+    usePairStore.getState().setIncomingRequest(null);
   }, []);
 
   // ── declineRequest ─────────────────────────────────────────────────────────
@@ -170,20 +155,17 @@ export function usePairing() {
       .from('pair_requests')
       .update({ status: 'declined' })
       .eq('id', requestId);
-
     usePairStore.getState().setIncomingRequest(null);
   }, []);
 
-  // ── cancelOutgoing ─────────────────────────────────────────────────────────
-  const cancelOutgoing = useCallback(async (): Promise<void> => {
-    const req = usePairStore.getState().outgoingRequest;
-    if (!req) return;
+  // ── cancelInvite ───────────────────────────────────────────────────────────
+  const cancelInvite = useCallback(async (requestId: string): Promise<void> => {
     await supabase
       .from('pair_requests')
       .update({ status: 'declined' })
-      .eq('id', req.id);
-    usePairStore.getState().setOutgoingRequest(null);
+      .eq('id', requestId);
+    usePairStore.getState().removePendingInvite(requestId);
   }, []);
 
-  return { sendPairRequest, acceptRequest, declineRequest, cancelOutgoing };
+  return { sendPairRequest, acceptRequest, declineRequest, cancelInvite };
 }

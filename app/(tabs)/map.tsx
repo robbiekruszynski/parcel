@@ -9,7 +9,7 @@
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -68,11 +68,11 @@ export default function MapScreen() {
     claimParcel,
   } = useParcelTracking(activityType);
 
-  const { sendPairRequest, acceptRequest, declineRequest, cancelOutgoing } = usePairing();
+  const { sendPairRequest, acceptRequest, declineRequest, cancelInvite } = usePairing();
 
-  const pairedUsername  = usePairStore((s) => s.pairedUsername);
+  const partners        = usePairStore((s) => s.partners);
+  const pendingInvites  = usePairStore((s) => s.pendingInvites);
   const incomingRequest = usePairStore((s) => s.incomingRequest);
-  const outgoingRequest = usePairStore((s) => s.outgoingRequest);
 
   const activityLocked = isTracking || isPaused;
 
@@ -123,7 +123,7 @@ export default function MapScreen() {
         loopClosed={loopClosed}
         distanceM={distanceM}
         areaM2={areaM2}
-        pairedUsername={pairedUsername}
+        partners={partners}
         onPairPress={() => setShowFindPartner(true)}
         onStart={startTracking}
         onPause={pauseTracking}
@@ -156,18 +156,11 @@ export default function MapScreen() {
         animationType="slide"
         onRequestClose={() => setShowFindPartner(false)}>
         <FindPartnerSheet
-          outgoingRequest={outgoingRequest}
-          onSend={async (username) => {
-            await sendPairRequest(username);
-          }}
-          onCancel={async () => {
-            if (outgoingRequest) await cancelOutgoing();
-            setShowFindPartner(false);
-          }}
-          onClose={() => {
-            if (!outgoingRequest) setShowFindPartner(false);
-          }}
-          onPaired={() => setShowFindPartner(false)}
+          partners={partners}
+          pendingInvites={pendingInvites}
+          onSend={sendPairRequest}
+          onCancelInvite={cancelInvite}
+          onClose={() => setShowFindPartner(false)}
         />
       </Modal>
 
@@ -214,7 +207,7 @@ function IncomingRequestSheet({
         <Text style={sheetStyles.title}>Pair Request</Text>
         <Text style={sheetStyles.body}>
           <Text style={sheetStyles.highlight}>@{fromUsername ?? 'someone'}</Text>
-          {' '}wants to walk with you and share the next parcel 50/50.
+          {' '}wants to walk with you — points on the next claimed parcel will be split equally among your party.
         </Text>
         <View style={sheetStyles.row}>
           <Pressable style={[sheetStyles.btn, sheetStyles.btnDecline]} onPress={onDecline}>
@@ -232,68 +225,81 @@ function IncomingRequestSheet({
 // ─── Find-partner sheet ───────────────────────────────────────────────────────
 
 function FindPartnerSheet({
-  outgoingRequest,
+  partners,
+  pendingInvites,
   onSend,
-  onCancel,
+  onCancelInvite,
   onClose,
-  onPaired,
 }: {
-  outgoingRequest: { toUsername: string } | null;
+  partners: { id: string; username: string | null }[];
+  pendingInvites: { requestId: string; toUserId: string; toUsername: string }[];
   onSend: (username: string) => Promise<void>;
-  onCancel: () => Promise<void>;
+  onCancelInvite: (requestId: string) => Promise<void>;
   onClose: () => void;
-  onPaired: () => void;
 }) {
   const [username, setUsername] = useState('');
   const [busy, setBusy] = useState(false);
-  const pairedUsername = usePairStore((s) => s.pairedUsername);
-
-  // Auto-close when the outgoing request gets accepted
-  useEffect(() => {
-    if (pairedUsername && outgoingRequest) onPaired();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pairedUsername, outgoingRequest]);
 
   const handleSend = useCallback(async () => {
     if (!username.trim()) return;
     setBusy(true);
     try {
       await onSend(username.trim());
+      setUsername(''); // clear input after successful send
     } catch (e: unknown) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to send request');
+    } finally {
       setBusy(false);
     }
   }, [username, onSend]);
 
-  if (outgoingRequest) {
-    return (
-      <View style={sheetStyles.backdrop}>
-        <View style={sheetStyles.sheet}>
-          <View style={sheetStyles.handle} />
-          <ActivityIndicator color="#63dc96" size="large" style={{ marginBottom: 16 }} />
-          <Text style={sheetStyles.title}>Waiting for @{outgoingRequest.toUsername}</Text>
-          <Text style={sheetStyles.body}>
-            They have 2 minutes to accept. You'll both share the next parcel 50/50.
-          </Text>
-          <Pressable
-            style={[sheetStyles.btn, sheetStyles.btnDecline, { marginTop: 8 }]}
-            onPress={() => void onCancel()}>
-            <Text style={sheetStyles.btnDeclineText}>Cancel Request</Text>
-          </Pressable>
-        </View>
-      </View>
-    );
-  }
+  const hasActivity = partners.length > 0 || pendingInvites.length > 0;
 
   return (
     <View style={sheetStyles.backdrop}>
       <Pressable style={{ flex: 1 }} onPress={onClose} />
       <View style={sheetStyles.sheet}>
         <View style={sheetStyles.handle} />
-        <Text style={sheetStyles.title}>Find a Partner</Text>
-        <Text style={sheetStyles.body}>
-          Enter your partner's username. When they accept, your next claimed parcel is shared 50/50.
+
+        {/* Header row */}
+        <View style={partnerStyles.headerRow}>
+          <Text style={sheetStyles.title}>Walking Party</Text>
+          <Pressable onPress={onClose} style={partnerStyles.doneBtn}>
+            <Text style={partnerStyles.doneTxt}>Done</Text>
+          </Pressable>
+        </View>
+
+        <Text style={[sheetStyles.body, { marginBottom: hasActivity ? 14 : 8 }]}>
+          Add partners by @username. Points split equally when you claim.
         </Text>
+
+        {/* Confirmed partners */}
+        {partners.map((p) => (
+          <View key={p.id} style={partnerStyles.row}>
+            <MaterialCommunityIcons name="account-check" size={15} color="#63dc96" />
+            <Text style={partnerStyles.name}>@{p.username ?? 'unknown'}</Text>
+            <View style={partnerStyles.confirmedBadge}>
+              <Text style={partnerStyles.confirmedTxt}>CONFIRMED</Text>
+            </View>
+          </View>
+        ))}
+
+        {/* Pending invites */}
+        {pendingInvites.map((inv) => (
+          <View key={inv.requestId} style={partnerStyles.row}>
+            <ActivityIndicator size="small" color="#f5c518" style={{ width: 15 }} />
+            <Text style={[partnerStyles.name, { color: '#f5c518' }]}>@{inv.toUsername}</Text>
+            <Pressable
+              onPress={() => void onCancelInvite(inv.requestId)}
+              style={partnerStyles.cancelBtn}>
+              <Text style={partnerStyles.cancelTxt}>Cancel</Text>
+            </Pressable>
+          </View>
+        ))}
+
+        {hasActivity && <View style={partnerStyles.divider} />}
+
+        {/* Add partner input */}
         <View style={sheetStyles.inputRow}>
           <Text style={sheetStyles.atSign}>@</Text>
           <TextInput
@@ -307,19 +313,15 @@ function FindPartnerSheet({
             onSubmitEditing={() => void handleSend()}
           />
         </View>
-        <View style={sheetStyles.row}>
-          <Pressable style={[sheetStyles.btn, sheetStyles.btnDecline]} onPress={onClose}>
-            <Text style={sheetStyles.btnDeclineText}>Cancel</Text>
-          </Pressable>
-          <Pressable
-            style={[sheetStyles.btn, sheetStyles.btnAccept, (!username.trim() || busy) && { opacity: 0.5 }]}
-            onPress={() => void handleSend()}
-            disabled={!username.trim() || busy}>
-            {busy
-              ? <ActivityIndicator color="#0e0e10" size="small" />
-              : <Text style={sheetStyles.btnAcceptText}>Send Request</Text>}
-          </Pressable>
-        </View>
+
+        <Pressable
+          style={[sheetStyles.btn, sheetStyles.btnAccept, (!username.trim() || busy) && { opacity: 0.5 }]}
+          onPress={() => void handleSend()}
+          disabled={!username.trim() || busy}>
+          {busy
+            ? <ActivityIndicator color="#0e0e10" size="small" />
+            : <Text style={sheetStyles.btnAcceptText}>Send Request</Text>}
+        </Pressable>
       </View>
     </View>
   );
@@ -544,6 +546,77 @@ const helpStyles = StyleSheet.create({
     fontSize: 11,
     color: 'rgba(255,255,255,0.2)',
     letterSpacing: 0.5,
+  },
+});
+
+// ─── Partner row styles ───────────────────────────────────────────────────────
+
+const partnerStyles = StyleSheet.create({
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  doneBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  doneTxt: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.55)',
+    letterSpacing: 0.5,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 10,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
+  },
+  name: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 14,
+    color: '#fff',
+    flex: 1,
+    letterSpacing: 0.3,
+  },
+  confirmedBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: 'rgba(99,220,150,0.15)',
+  },
+  confirmedTxt: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 10,
+    color: '#63dc96',
+    letterSpacing: 1,
+  },
+  cancelBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: 'rgba(248,113,113,0.12)',
+  },
+  cancelTxt: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 10,
+    color: '#f87171',
+    letterSpacing: 0.5,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    marginVertical: 14,
   },
 });
 

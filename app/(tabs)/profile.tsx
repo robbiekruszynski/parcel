@@ -119,23 +119,27 @@ function SettingsFooter({ onSignOut }: { onSignOut: () => void }) {
         <Text style={styles.sectionHeaderText}>SETTINGS</Text>
       </View>
 
-      {/* Strava connect */}
+      {/* Strava / Activity sync */}
       <View style={styles.settingsGroup}>
         <View style={styles.settingsRow}>
           <FontAwesome name="heartbeat" size={16} color="#fb923c" style={{ marginRight: 10 }} />
-          <Text style={styles.settingsRowLabel}>Strava</Text>
+          <Text style={styles.settingsRowLabel}>Activity Sync</Text>
+          <Text style={styles.settingsRowSub}> · Strava</Text>
         </View>
-        <View style={{ marginTop: 10 }}>
+        <Text style={styles.settingsRowHint}>
+          Auto-upload every session after you claim a parcel.
+        </Text>
+        <View style={{ marginTop: 12 }}>
           <StravaConnectButton />
         </View>
       </View>
 
-      {/* More settings link */}
+      {/* Settings link */}
       <Pressable
         style={styles.settingsLinkRow}
         onPress={() => router.push('/settings')}>
         <FontAwesome name="sliders" size={15} color="rgba(255,255,255,0.5)" style={{ marginRight: 10 }} />
-        <Text style={styles.settingsLinkText}>More settings</Text>
+        <Text style={styles.settingsLinkText}>Account &amp; settings</Text>
         <FontAwesome name="chevron-right" size={12} color="rgba(255,255,255,0.2)" style={{ marginLeft: 'auto' }} />
       </Pressable>
 
@@ -449,6 +453,18 @@ const styles = StyleSheet.create({
     fontFamily: 'Rajdhani_600SemiBold',
     fontSize: 14,
     color: '#f3f4f6',
+  },
+  settingsRowSub: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.35)',
+  },
+  settingsRowHint: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.3)',
+    marginTop: 4,
+    lineHeight: 17,
   },
   settingsLinkRow: {
     flexDirection: 'row',

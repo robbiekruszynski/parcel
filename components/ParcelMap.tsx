@@ -146,9 +146,11 @@ export function ParcelMap({ cameraRef: externalCameraRef, activityFilter }: Parc
           ],
         },
         properties: {
-          id:       p.id,
-          color:    p.color,
-          username: p.owner_username ? `@${p.owner_username}` : '',
+          id:            p.id,
+          color:         p.color,
+          username:      p.owner_username ? `@${p.owner_username}` : '',
+          groupName:     p.group_name ?? '',
+          coOwnersCount: p.co_owners?.length ?? 0,
         },
       })),
   }), [parcels, activityFilter]);
@@ -225,12 +227,17 @@ export function ParcelMap({ cameraRef: externalCameraRef, activityFilter }: Parc
               lineJoin:  'round',
             }}
           />
-          {/* Username label centred on each polygon, visible at zoom ≥ 14 */}
+          {/* Label: group name if set, otherwise @username. Visible at zoom ≥ 14 */}
           <MapboxGL.SymbolLayer
             id="parcels-labels"
             minZoomLevel={14}
             style={{
-              textField:           ['get', 'username'],
+              textField: [
+                'case',
+                ['!=', ['get', 'groupName'], ''],
+                ['get', 'groupName'],
+                ['get', 'username'],
+              ],
               textSize:            12,
               textColor:           '#ffffff',
               textHaloColor:       'rgba(0,0,0,0.7)',
@@ -320,10 +327,21 @@ function ParcelDetailSheet({
         <View style={styles.sheetHeader}>
           <View style={[styles.colorSwatch, { backgroundColor: parcel.color }]} />
           <View style={{ flex: 1 }}>
+            {/* Group name badge */}
+            {parcel.group_name ? (
+              <View style={styles.groupBadge}>
+                <Text style={styles.groupBadgeText}>{parcel.group_name.toUpperCase()}</Text>
+              </View>
+            ) : null}
             <Text style={styles.ownerName}>
               @{parcel.owner_username ?? 'unknown'}
             </Text>
-            {parcel.owner_display_name ? (
+            {/* Co-owners line */}
+            {parcel.co_owners.length > 0 ? (
+              <Text style={styles.ownerDisplayName}>
+                +{parcel.co_owners.length} co-owner{parcel.co_owners.length > 1 ? 's' : ''} · points split {parcel.co_owners.length + 1} ways
+              </Text>
+            ) : parcel.owner_display_name ? (
               <Text style={styles.ownerDisplayName}>{parcel.owner_display_name}</Text>
             ) : null}
           </View>
@@ -458,6 +476,22 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 12,
+  },
+  groupBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: 'rgba(167,139,250,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(167,139,250,0.35)',
+    marginBottom: 5,
+  },
+  groupBadgeText: {
+    fontFamily: FONT_LABEL,
+    fontSize: 9,
+    letterSpacing: 1.5,
+    color: '#a78bfa',
   },
   ownerName: {
     fontFamily: FONT_DISPLAY,

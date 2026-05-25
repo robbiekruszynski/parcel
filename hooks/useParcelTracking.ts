@@ -35,6 +35,8 @@ interface ParcelRow {
   id: string;
   owner_id: string;
   co_owner_id: string | null;
+  co_owners: string[] | null;
+  group_id: string | null;
   coordinates: [number, number][] | null;
   area_sqm: number | null;
   claimed_at: string;
@@ -42,6 +44,7 @@ interface ParcelRow {
   points: number | null;
   activity: string | null;
   profiles: { username: string | null; display_name: string | null } | null;
+  groups: { name: string | null } | null;
 }
 
 export function rowToParcel(row: ParcelRow): Parcel {
@@ -49,6 +52,9 @@ export function rowToParcel(row: ParcelRow): Parcel {
     id:                  row.id,
     owner_id:            row.owner_id,
     co_owner_id:         row.co_owner_id ?? null,
+    co_owners:           row.co_owners ?? [],
+    group_id:            row.group_id ?? null,
+    group_name:          row.groups?.name ?? null,
     coordinates:         row.coordinates ?? [],
     area_sqm:            row.area_sqm ?? 0,
     claimed_at:          row.claimed_at,
@@ -96,9 +102,10 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
           const { data } = await supabase
             .from('parcels')
             .select(`
-              id, owner_id, co_owner_id, coordinates, area_sqm, claimed_at,
+              id, owner_id, co_owner_id, co_owners, group_id, coordinates, area_sqm, claimed_at,
               color, points, activity,
-              profiles ( username, display_name )
+              profiles ( username, display_name ),
+              groups ( name )
             `)
             .eq('id', newRow.id)
             .single();
@@ -167,46 +174,66 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     const color        = userParcelColor(uid);
     const fullPoints   = Math.max(1, Math.round(area_sqm / 50));
 
-    // ── Cooperative claim? ────────────────────────────────────────────────
-    const { pairedUserId } = usePairStore.getState();
-    const isCoop   = pairedUserId !== null;
-    const ownerPts = isCoop ? Math.max(1, Math.floor(fullPoints / 2)) : fullPoints;
+    // ── Cooperative claim (N-way split) ──────────────────────────────────
+    const { partners } = usePairStore.getState();
+    const partySize = 1 + partners.length;             // owner + all partners
+    const eachPts   = Math.max(1, Math.floor(fullPoints / partySize));
+    const coOwnerIds = partners.map((p) => p.id);
+
+    // Check if all party members share a group
+    let sharedGroupId: string | null = null;
+    if (partners.length > 0) {
+      const allIds = [uid, ...coOwnerIds];
+      const { data: memberRows } = await supabase
+        .from('group_members')
+        .select('group_id, user_id')
+        .in('user_id', allIds);
+
+      if (memberRows) {
+        const countByGroup: Record<string, number> = {};
+        for (const r of memberRows) {
+          countByGroup[r.group_id] = (countByGroup[r.group_id] ?? 0) + 1;
+        }
+        const found = Object.entries(countByGroup).find(([, c]) => c >= allIds.length);
+        sharedGroupId = found?.[0] ?? null;
+      }
+    }
 
     const { data, error } = await supabase
       .from('parcels')
       .insert({
         owner_id:    uid,
-        co_owner_id: pairedUserId ?? null,
+        co_owner_id: coOwnerIds[0] ?? null,   // legacy compat
+        co_owners:   coOwnerIds,
+        group_id:    sharedGroupId,
         activity:    activityType,
         coordinates,
         area_sqm,
         color,
-        points:      ownerPts,
+        points:      eachPts,
         claimed_at:  new Date().toISOString(),
       })
       .select(`
-        id, owner_id, co_owner_id, coordinates, area_sqm, claimed_at,
+        id, owner_id, co_owner_id, co_owners, group_id, coordinates, area_sqm, claimed_at,
         color, points, activity,
-        profiles ( username, display_name )
+        profiles ( username, display_name ),
+        groups ( name )
       `)
       .single();
 
     if (error) throw new Error(error.message);
     if (data) useParcelStore.getState().addParcel(rowToParcel(data as unknown as ParcelRow));
 
-    // Credit owner points
-    const { error: ptErr } = await supabase.rpc('credit_parcel_points', {
-      p_uid: uid, p_points: ownerPts,
-    });
-    if (__DEV__ && ptErr) console.warn('[claimParcel] owner points credit failed:', ptErr.message);
-
-    // Credit co-owner points (same amount)
-    if (isCoop && pairedUserId) {
-      const { error: coPtErr } = await supabase.rpc('credit_parcel_points', {
-        p_uid: pairedUserId, p_points: ownerPts,
-      });
-      if (__DEV__ && coPtErr) console.warn('[claimParcel] co-owner points credit failed:', coPtErr.message);
-    }
+    // Credit all party members equally
+    const allPartyIds = [uid, ...coOwnerIds];
+    await Promise.all(
+      allPartyIds.map((pid) =>
+        supabase.rpc('credit_parcel_points', { p_uid: pid, p_points: eachPts })
+          .then(({ error: e }) => {
+            if (__DEV__ && e) console.warn('[claimParcel] points credit failed for', pid, e.message);
+          })
+      )
+    );
 
     // Clear pair state after successful claim
     usePairStore.getState().clearPairing();

@@ -27,8 +27,8 @@ export interface ParcelRecordingOverlayProps {
   distanceM: number;
   areaM2: number | null;
 
-  /** Set when a cooperative pair is confirmed — shows the partner badge. */
-  pairedUsername?: string | null;
+  /** Confirmed partners — shows a partner-list badge. */
+  partners?: { id: string; username: string | null }[];
   /** Called when user taps the PAIR button to open the partner-search modal. */
   onPairPress?: () => void;
 
@@ -54,7 +54,7 @@ export function ParcelRecordingOverlay({
   loopClosed,
   distanceM,
   areaM2,
-  pairedUsername,
+  partners = [],
   onPairPress,
   onStart,
   onPause,
@@ -112,11 +112,14 @@ export function ParcelRecordingOverlay({
     setBusy(true);
     try {
       await onClaim();
-      const pts = areaM2 != null ? Math.min(500, Math.max(1, Math.round(areaM2 / 50))) : null;
+      const partySize = 1 + partners.length;
+      const fullPts = areaM2 != null ? Math.max(1, Math.round(areaM2 / 50)) : null;
+      const eachPts = fullPts != null ? Math.max(1, Math.floor(fullPts / partySize)) : null;
+      const splitNote = partySize > 1 ? ` (split ${partySize} ways)` : '';
       Alert.alert(
         'Parcel claimed!',
         areaM2 != null
-          ? `${formatAreaM2(areaM2)} of territory locked in.\n+${pts} points earned.`
+          ? `${formatAreaM2(areaM2)} of territory locked in.\n+${eachPts} points each${splitNote}.`
           : 'Your territory has been saved.'
       );
     } catch (e: unknown) {
@@ -176,8 +179,8 @@ export function ParcelRecordingOverlay({
         </View>
 
         {/* ── Cooperative pair badge / button ────────────────────────────────── */}
-        {pairedUsername ? (
-          <PairedBadge username={pairedUsername} />
+        {partners.length > 0 ? (
+          <PairedBadge partners={partners} onPairPress={onPairPress} />
         ) : (
           !loopClosed && onPairPress && (
             <Pressable
@@ -347,30 +350,40 @@ function StatBox({
   );
 }
 
-function PairedBadge({ username }: { username: string }) {
+function PairedBadge({
+  partners,
+  onPairPress,
+}: {
+  partners: { id: string; username: string | null }[];
+  onPairPress?: () => void;
+}) {
+  const names = partners
+    .map((p) => (p.username ? `@${p.username}` : 'unknown'))
+    .join(', ');
+
   return (
     <View
       style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-        paddingVertical: 9,
         marginBottom: 14,
         borderRadius: 12,
         borderWidth: 1,
         backgroundColor: 'rgba(99,220,150,0.08)',
         borderColor: 'rgba(99,220,150,0.3)',
+        overflow: 'hidden',
       }}>
-      <MaterialCommunityIcons name="account-check" size={15} color="#63dc96" />
-      <Text style={{
-        fontFamily: FONT,
-        fontSize: 12,
-        letterSpacing: 1.8,
-        color: '#63dc96',
-        fontWeight: '700',
-      }}>
-        PAIRED WITH @{username}
+      <View style={{ flexDirection: 'row', alignItems: 'center', padding: 10, gap: 8 }}>
+        <MaterialCommunityIcons name="account-multiple-check" size={15} color="#63dc96" />
+        <Text style={{ fontFamily: FONT, fontSize: 11, letterSpacing: 1.5, color: '#63dc96', fontWeight: '700', flex: 1 }}>
+          {partners.length === 1 ? 'WALKING WITH' : `${partners.length} PARTNERS`}
+        </Text>
+        {onPairPress && (
+          <Pressable onPress={onPairPress} style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(99,220,150,0.15)' }}>
+            <Text style={{ fontFamily: FONT, fontSize: 10, color: '#63dc96', letterSpacing: 1 }}>+ ADD</Text>
+          </Pressable>
+        )}
+      </View>
+      <Text style={{ fontFamily: FONT, fontSize: 12, color: 'rgba(99,220,150,0.7)', paddingHorizontal: 10, paddingBottom: 10 }}>
+        {names}
       </Text>
     </View>
   );

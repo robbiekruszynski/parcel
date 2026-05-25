@@ -5,8 +5,14 @@ import { create } from 'zustand';
 export interface Parcel {
   id: string;
   owner_id: string;
-  /** Second owner for cooperative (50/50) claims. */
+  /** Legacy single co-owner field (Phase 4, kept for compat). */
   co_owner_id: string | null;
+  /** All co-owners (multi-person claim). Array of user IDs. */
+  co_owners: string[];
+  /** If all co-owners share a group, this is set to that group's id. */
+  group_id: string | null;
+  /** Denormalised group name for map display. */
+  group_name: string | null;
   /** [lat, lng] pairs — matches the jsonb storage format in Supabase. */
   coordinates: [number, number][];
   area_sqm: number;

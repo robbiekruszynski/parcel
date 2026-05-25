@@ -12,16 +12,13 @@ import {
 } from 'react-native';
 
 import { useAuth } from '@/components/AuthProvider';
-import { useStravaAuth } from '@/hooks/useStravaAuth';
 import { isSupabaseConfigured } from '@/lib/supabase';
 
 export default function SignInScreen() {
   const { signIn } = useAuth();
-  const { signInWithStrava } = useStravaAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
-  const [stravaBusy, setStravaBusy] = useState(false);
 
   const onSignIn = async () => {
     if (!isSupabaseConfigured) {
@@ -46,23 +43,9 @@ export default function SignInScreen() {
     }
   };
 
-  const onStravaSignIn = async () => {
-    setStravaBusy(true);
-    try {
-      await signInWithStrava();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Strava sign-in failed';
-      Alert.alert('Strava sign-in failed', msg);
-    } finally {
-      setStravaBusy(false);
-    }
-  };
-
-  const anyBusy = busy || stravaBusy;
-
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       className="flex-1 bg-parcel-bg-dark">
       <View className="flex-1 justify-center px-8">
         <Text
@@ -86,7 +69,7 @@ export default function SignInScreen() {
           autoCorrect={false}
           keyboardType="email-address"
           textContentType="emailAddress"
-          editable={!anyBusy}
+          editable={!busy}
         />
         <TextInput
           value={password}
@@ -98,13 +81,13 @@ export default function SignInScreen() {
           autoComplete="off"
           textContentType="none"
           passwordRules=""
-          editable={!anyBusy}
+          editable={!busy}
         />
 
         <Pressable
           className="mb-3 rounded-xl bg-white py-4"
           onPress={() => void onSignIn()}
-          disabled={anyBusy}>
+          disabled={busy}>
           {busy ? (
             <ActivityIndicator color="#0b0d12" />
           ) : (
@@ -113,34 +96,10 @@ export default function SignInScreen() {
         </Pressable>
 
         <Pressable
-          className="mb-6 rounded-xl border border-white/25 py-4"
+          className="rounded-xl border border-white/25 py-4"
           onPress={() => router.push('/(auth)/register')}
-          disabled={anyBusy}>
+          disabled={busy}>
           <Text className="text-center font-semibold text-white">Create account</Text>
-        </Pressable>
-
-        {/* Divider */}
-        <View className="mb-4 flex-row items-center gap-3">
-          <View className="h-px flex-1 bg-white/15" />
-          <Text className="text-xs text-white/35" style={{ fontFamily: 'DMMono_400Regular' }}>
-            or
-          </Text>
-          <View className="h-px flex-1 bg-white/15" />
-        </View>
-
-        {/* Continue with Strava */}
-        <Pressable
-          className="flex-row items-center justify-center gap-2 rounded-xl py-4"
-          style={{ backgroundColor: '#FC4C02' }}
-          onPress={() => void onStravaSignIn()}
-          disabled={anyBusy}>
-          {stravaBusy ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text className="text-center text-base font-bold text-white">
-              Continue with Strava
-            </Text>
-          )}
         </Pressable>
       </View>
     </KeyboardAvoidingView>

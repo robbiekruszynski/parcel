@@ -253,9 +253,27 @@ export default function GroupScreen() {
     if (!myUserId) return;
     setBusy(true);
     try {
+      // Enforce 3-group limit
+      const { count } = await supabase
+        .from('group_members')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', myUserId);
+
+      if ((count ?? 0) >= 3) {
+        Alert.alert(
+          'Group limit reached',
+          'You can be in up to 3 groups at a time. Leave a group to create a new one.'
+        );
+        setBusy(false);
+        return;
+      }
+
+      // Generate a unique 6-char invite code
+      const invite_code = Math.random().toString(36).substring(2, 8).toUpperCase();
+
       const { data: g, error } = await supabase
         .from('groups')
-        .insert({ name, created_by: myUserId })
+        .insert({ name, created_by: myUserId, invite_code })
         .select('id')
         .single();
       if (error || !g) throw new Error(error?.message ?? 'Failed to create group');
@@ -382,8 +400,9 @@ export default function GroupScreen() {
 
       {/* ── Create group modal ─────────────────────────────────────────────── */}
       <Modal visible={createVisible} transparent animationType="slide" onRequestClose={() => setCreateVisible(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setCreateVisible(false)} />
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+          <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+          <Pressable style={[styles.modalBackdrop, StyleSheet.absoluteFillObject]} onPress={() => setCreateVisible(false)} />
           <View style={styles.modalSheet}>
             <View style={styles.sheetHandle} />
             <Text style={styles.modalTitle}>Create Group</Text>
@@ -400,13 +419,15 @@ export default function GroupScreen() {
               {busy ? <ActivityIndicator color="#0e0e10" /> : <Text style={styles.modalBtnText}>Create</Text>}
             </Pressable>
           </View>
+          </View>
         </KeyboardAvoidingView>
       </Modal>
 
       {/* ── Invite modal ───────────────────────────────────────────────────── */}
       <Modal visible={!!inviteGroupId} transparent animationType="slide" onRequestClose={() => setInviteGroupId(null)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setInviteGroupId(null)} />
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+          <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+          <Pressable style={[styles.modalBackdrop, StyleSheet.absoluteFillObject]} onPress={() => setInviteGroupId(null)} />
           <View style={styles.modalSheet}>
             <View style={styles.sheetHandle} />
             <Text style={styles.modalTitle}>Invite by Username</Text>
@@ -424,6 +445,7 @@ export default function GroupScreen() {
             <Pressable style={[styles.modalBtn, busy && { opacity: 0.5 }]} onPress={() => void handleInvite()} disabled={busy}>
               {busy ? <ActivityIndicator color="#0e0e10" /> : <Text style={styles.modalBtnText}>Add to Group</Text>}
             </Pressable>
+          </View>
           </View>
         </KeyboardAvoidingView>
       </Modal>

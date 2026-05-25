@@ -29,7 +29,9 @@ if (Platform.OS === 'android') {
 interface ParcelRow {
   id: string;
   owner_id: string;
-  co_owner_id?: string | null;
+  co_owner_id: string | null;
+  co_owners: string[] | null;
+  group_id: string | null;
   coordinates: [number, number][] | null;
   area_sqm: number | null;
   claimed_at: string;
@@ -37,23 +39,27 @@ interface ParcelRow {
   points: number | null;
   activity: string | null;
   profiles: { username: string | null; display_name: string | null } | null;
+  groups: { name: string | null } | null;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 function rowToParcel(row: ParcelRow): Parcel {
   return {
-    id: row.id,
-    owner_id: row.owner_id,
-    co_owner_id: row.co_owner_id ?? null,
-    coordinates: row.coordinates ?? [],
-    area_sqm: row.area_sqm ?? 0,
-    claimed_at: row.claimed_at,
-    color: row.color ?? '#f5c518',
-    points: row.points ?? 0,
-    activity: row.activity ?? 'walking',
-    owner_username: row.profiles?.username ?? null,
-    owner_display_name: row.profiles?.display_name ?? null,
+    id:                  row.id,
+    owner_id:            row.owner_id,
+    co_owner_id:         row.co_owner_id ?? null,
+    co_owners:           row.co_owners ?? [],
+    group_id:            row.group_id ?? null,
+    group_name:          row.groups?.name ?? null,
+    coordinates:         row.coordinates ?? [],
+    area_sqm:            row.area_sqm ?? 0,
+    claimed_at:          row.claimed_at,
+    color:               row.color ?? '#f5c518',
+    points:              row.points ?? 0,
+    activity:            row.activity ?? 'walking',
+    owner_username:      row.profiles?.username ?? null,
+    owner_display_name:  row.profiles?.display_name ?? null,
   };
 }
 
@@ -216,8 +222,16 @@ function ParcelCard({
             {parcel.owner_display_name ? (
               <DetailRow label="OWNER" value={parcel.owner_display_name} />
             ) : null}
-            {parcel.co_owner_id ? (
-              <DetailRow label="CO-OWNER" value="Cooperative claim (50/50)" />
+            {parcel.group_name ? (
+              <DetailRow label="GROUP" value={parcel.group_name} />
+            ) : null}
+            {parcel.co_owners.length > 0 ? (
+              <DetailRow
+                label={`CO-OWNER${parcel.co_owners.length > 1 ? 'S' : ''}`}
+                value={`${parcel.co_owners.length + 1}-way cooperative claim`}
+              />
+            ) : parcel.co_owner_id ? (
+              <DetailRow label="CO-OWNER" value="Cooperative claim" />
             ) : null}
 
             {/* View route button */}
@@ -260,7 +274,7 @@ export default function TerritoryScreen() {
         supabase
           .from('parcels')
           .select(
-            'id, owner_id, co_owner_id, coordinates, area_sqm, claimed_at, color, points, activity, profiles(username, display_name)'
+            'id, owner_id, co_owner_id, co_owners, group_id, coordinates, area_sqm, claimed_at, color, points, activity, profiles(username, display_name), groups(name)'
           )
           .not('coordinates', 'is', null)
           .order('claimed_at', { ascending: false })
