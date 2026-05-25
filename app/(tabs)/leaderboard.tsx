@@ -67,26 +67,39 @@ function PlayerRow({
   sortMode: SortMode;
   onPress: () => void;
 }) {
+  const primaryValue = sortMode === 'points'
+    ? entry.points_total.toLocaleString()
+    : entry.parcel_count.toLocaleString();
+  const primaryLabel = sortMode === 'points' ? 'pts' : 'parcels';
+
+  const secondaryValue = sortMode === 'points'
+    ? entry.parcel_count.toLocaleString()
+    : entry.points_total.toLocaleString();
+  const secondaryLabel = sortMode === 'points' ? 'parcels' : 'pts';
+
   return (
     <Pressable
+      onPress={onPress}
       style={({ pressed }) => [
         styles.row,
         isMe && styles.rowMe,
         pressed && styles.rowPressed,
-      ]}
-      onPress={onPress}>
+      ]}>
+      {/* Rank */}
       <View style={styles.rankCell}>
         {rank <= 3
           ? <Text style={styles.medal}>{MEDAL[rank]}</Text>
           : <Text style={styles.rankNum}>{rank}</Text>}
       </View>
 
+      {/* Avatar */}
       <View style={[styles.avatar, isMe && styles.avatarMe]}>
-        <Text style={[styles.avatarText, isMe && styles.avatarTextMe]}>
+        <Text style={[styles.avatarTxt, isMe && styles.avatarTxtMe]}>
           {initials(entry)}
         </Text>
       </View>
 
+      {/* Name block */}
       <View style={styles.nameBlock}>
         <Text style={[styles.username, isMe && styles.usernameMe]} numberOfLines={1}>
           @{entry.username ?? 'unknown'}
@@ -96,30 +109,17 @@ function PlayerRow({
         ) : null}
       </View>
 
-      <View style={styles.statBlock}>
-        <Text style={[styles.statPrimary, isMe && styles.statPrimaryMe]}>
-          {sortMode === 'points'
-            ? entry.points_total.toLocaleString()
-            : entry.parcel_count.toLocaleString()}
-        </Text>
-        <Text style={styles.statSub}>{sortMode === 'points' ? 'pts' : 'parcels'}</Text>
+      {/* Primary stat */}
+      <View style={styles.statCol}>
+        <Text style={[styles.statValue, isMe && styles.statValueMe]}>{primaryValue}</Text>
+        <Text style={styles.statLabel}>{primaryLabel}</Text>
       </View>
 
-      <View style={styles.statBlock}>
-        <Text style={styles.statSecondary}>
-          {sortMode === 'points'
-            ? entry.parcel_count.toLocaleString()
-            : entry.points_total.toLocaleString()}
-        </Text>
-        <Text style={styles.statSub}>{sortMode === 'points' ? 'parcels' : 'pts'}</Text>
+      {/* Secondary stat */}
+      <View style={[styles.statCol, styles.statColSecondary]}>
+        <Text style={styles.statValueDim}>{secondaryValue}</Text>
+        <Text style={styles.statLabel}>{secondaryLabel}</Text>
       </View>
-
-      <MaterialCommunityIcons
-        name="chevron-right"
-        size={14}
-        color="rgba(255,255,255,0.15)"
-        style={{ marginLeft: 2 }}
-      />
     </Pressable>
   );
 }
@@ -128,7 +128,7 @@ function PlayerRow({
 
 function GroupRow({ entry, rank }: { entry: GroupEntry; rank: number }) {
   return (
-    <View style={[styles.row, styles.groupRow]}>
+    <View style={styles.row}>
       <View style={styles.rankCell}>
         {rank <= 3
           ? <Text style={styles.medal}>{MEDAL[rank]}</Text>
@@ -136,7 +136,7 @@ function GroupRow({ entry, rank }: { entry: GroupEntry; rank: number }) {
       </View>
 
       <View style={styles.groupIcon}>
-        <MaterialCommunityIcons name="account-group" size={16} color="#a78bfa" />
+        <MaterialCommunityIcons name="account-group" size={15} color="#a78bfa" />
       </View>
 
       <View style={styles.nameBlock}>
@@ -146,9 +146,9 @@ function GroupRow({ entry, rank }: { entry: GroupEntry; rank: number }) {
         </Text>
       </View>
 
-      <View style={styles.statBlock}>
-        <Text style={styles.groupPts}>{entry.points.toLocaleString()}</Text>
-        <Text style={styles.statSub}>pool pts</Text>
+      <View style={styles.statCol}>
+        <Text style={[styles.statValue, { color: '#a78bfa' }]}>{entry.points.toLocaleString()}</Text>
+        <Text style={styles.statLabel}>pool pts</Text>
       </View>
     </View>
   );
@@ -160,12 +160,11 @@ export default function LeaderboardScreen() {
   const [viewMode, setViewMode] = useState<ViewMode>('players');
   const [sortMode, setSortMode] = useState<SortMode>('points');
 
-  const [entries, setEntries]     = useState<LeaderEntry[]>([]);
-  const [groups, setGroups]       = useState<GroupEntry[]>([]);
-  const [loading, setLoading]     = useState(false);
-  const [myUserId, setMyUserId]   = useState<string | null>(null);
+  const [entries, setEntries]   = useState<LeaderEntry[]>([]);
+  const [groups, setGroups]     = useState<GroupEntry[]>([]);
+  const [loading, setLoading]   = useState(false);
+  const [myUserId, setMyUserId] = useState<string | null>(null);
 
-  // Profile sheet
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -187,7 +186,6 @@ export default function LeaderboardScreen() {
 
       setMyUserId(sessionData.session?.user?.id ?? null);
 
-      // ── Players ──
       const countMap: Record<string, number> = {};
       for (const r of parcelRows ?? []) {
         countMap[r.owner_id] = (countMap[r.owner_id] ?? 0) + 1;
@@ -202,7 +200,6 @@ export default function LeaderboardScreen() {
         }))
       );
 
-      // ── Groups ──
       const memberMap: Record<string, number> = {};
       for (const r of memberCountRows ?? []) {
         memberMap[r.group_id] = (memberMap[r.group_id] ?? 0) + 1;
@@ -227,90 +224,69 @@ export default function LeaderboardScreen() {
       ? b.points_total - a.points_total
       : b.parcel_count - a.parcel_count
   );
-
   const sortedGroups = [...groups].sort((a, b) => b.points - a.points);
 
   return (
     <SafeAreaView style={styles.root}>
+
       {/* ── Header ── */}
       <View style={styles.header}>
         <Text style={styles.title}>Rankings</Text>
-        <View style={styles.viewToggle}>
+
+        {/* Players / Groups toggle */}
+        <View style={styles.toggle}>
           <Pressable
-            style={[styles.viewBtn, viewMode === 'players' && styles.viewBtnActive]}
+            style={[styles.toggleBtn, viewMode === 'players' && styles.toggleBtnActive]}
             onPress={() => setViewMode('players')}>
-            <MaterialCommunityIcons
-              name="account"
-              size={13}
-              color={viewMode === 'players' ? '#0e0e10' : 'rgba(255,255,255,0.45)'}
-              style={{ marginRight: 4 }}
-            />
-            <Text style={[styles.viewBtnText, viewMode === 'players' && styles.viewBtnTextActive]}>
+            <Text style={[styles.toggleTxt, viewMode === 'players' && styles.toggleTxtActive]}>
               Players
             </Text>
           </Pressable>
           <Pressable
-            style={[styles.viewBtn, viewMode === 'groups' && styles.viewBtnActive]}
+            style={[styles.toggleBtn, viewMode === 'groups' && styles.toggleBtnActive]}
             onPress={() => setViewMode('groups')}>
-            <MaterialCommunityIcons
-              name="account-group"
-              size={13}
-              color={viewMode === 'groups' ? '#0e0e10' : 'rgba(255,255,255,0.45)'}
-              style={{ marginRight: 4 }}
-            />
-            <Text style={[styles.viewBtnText, viewMode === 'groups' && styles.viewBtnTextActive]}>
+            <Text style={[styles.toggleTxt, viewMode === 'groups' && styles.toggleTxtActive]}>
               Groups
             </Text>
           </Pressable>
         </View>
       </View>
 
-      {/* ── Player sort toggle ── */}
+      {/* ── Sort toggle (players only) ── */}
       {viewMode === 'players' && (
         <View style={styles.sortRow}>
           <Text style={styles.sortLabel}>Sort by</Text>
-          <View style={styles.sortToggle}>
-            <Pressable
-              style={[styles.sortBtn, sortMode === 'points' && styles.sortBtnActive]}
-              onPress={() => setSortMode('points')}>
-              <Text style={[styles.sortBtnText, sortMode === 'points' && styles.sortBtnTextActive]}>
-                Points
-              </Text>
-            </Pressable>
-            <Pressable
-              style={[styles.sortBtn, sortMode === 'parcels' && styles.sortBtnActive]}
-              onPress={() => setSortMode('parcels')}>
-              <Text style={[styles.sortBtnText, sortMode === 'parcels' && styles.sortBtnTextActive]}>
-                Parcels
-              </Text>
-            </Pressable>
-          </View>
+          <Pressable
+            style={[styles.sortChip, sortMode === 'points' && styles.sortChipActive]}
+            onPress={() => setSortMode('points')}>
+            <Text style={[styles.sortChipTxt, sortMode === 'points' && styles.sortChipTxtActive]}>
+              Points
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.sortChip, sortMode === 'parcels' && styles.sortChipActive]}
+            onPress={() => setSortMode('parcels')}>
+            <Text style={[styles.sortChipTxt, sortMode === 'parcels' && styles.sortChipTxtActive]}>
+              Parcels
+            </Text>
+          </Pressable>
         </View>
       )}
 
-      {/* ── Group hint ── */}
-      {viewMode === 'groups' && (
-        <View style={styles.groupHint}>
-          <MaterialCommunityIcons name="information-outline" size={12} color="rgba(255,255,255,0.25)" />
-          <Text style={styles.groupHintText}>
-            Group pool points — earned from member contributions
-          </Text>
-        </View>
-      )}
-
-      {/* ── Column labels ── */}
-      <View style={styles.colHeaders}>
-        <Text style={[styles.colHeader, { width: 40 }]}>#</Text>
-        <Text style={[styles.colHeader, { flex: 1 }]}>
-          {viewMode === 'players' ? 'Player' : 'Group'}
+      {/* ── Column header ── */}
+      <View style={styles.colRow}>
+        <View style={styles.rankCell} />
+        <View style={styles.avatar} />
+        <Text style={[styles.colTxt, { flex: 1 }]}>
+          {viewMode === 'players' ? 'PLAYER' : 'GROUP'}
         </Text>
-        <Text style={[styles.colHeader, { width: 80, textAlign: 'right', marginRight: 16 }]}>
+        <Text style={[styles.colTxt, styles.colTxtRight, { width: COL_W }]}>
           {viewMode === 'players'
             ? (sortMode === 'points' ? 'PTS' : 'PARCELS')
             : 'POOL PTS'}
         </Text>
         {viewMode === 'players' && (
-          <Text style={[styles.colHeader, { width: 76, textAlign: 'right' }]}>
+          <Text style={[styles.colTxt, styles.colTxtRight, { width: COL_W2 }]}>
             {sortMode === 'points' ? 'PARCELS' : 'PTS'}
           </Text>
         )}
@@ -322,12 +298,12 @@ export default function LeaderboardScreen() {
           data={sortedPlayers}
           keyExtractor={(item) => item.user_id}
           refreshControl={
-            <RefreshControl refreshing={loading} onRefresh={() => void load()} tintColor="#f5c518" />
+            <RefreshControl refreshing={loading} onRefresh={() => void load()} tintColor={AMBER} />
           }
           contentContainerStyle={styles.list}
           ListEmptyComponent={
             loading
-              ? <ActivityIndicator color="#f5c518" style={{ marginTop: 60 }} />
+              ? <ActivityIndicator color={AMBER} style={{ marginTop: 60 }} />
               : <EmptyState icon="trophy-outline" text="No players yet" />
           }
           renderItem={({ item, index }) => (
@@ -345,12 +321,12 @@ export default function LeaderboardScreen() {
           data={sortedGroups}
           keyExtractor={(item) => item.id}
           refreshControl={
-            <RefreshControl refreshing={loading} onRefresh={() => void load()} tintColor="#f5c518" />
+            <RefreshControl refreshing={loading} onRefresh={() => void load()} tintColor={AMBER} />
           }
           contentContainerStyle={styles.list}
           ListEmptyComponent={
             loading
-              ? <ActivityIndicator color="#f5c518" style={{ marginTop: 60 }} />
+              ? <ActivityIndicator color={AMBER} style={{ marginTop: 60 }} />
               : <EmptyState icon="account-group-outline" text="No groups yet" />
           }
           renderItem={({ item, index }) => (
@@ -387,19 +363,24 @@ function EmptyState({
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-const AMBER = '#f5c518';
-const BG    = '#0e0e10';
+const AMBER  = '#f5c518';
+const BG     = '#0e0e10';
+
+// Column widths — keep in sync between header and rows
+const COL_W  = 68;   // primary stat
+const COL_W2 = 56;   // secondary stat
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: BG },
 
+  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 12,
+    paddingTop: 14,
+    paddingBottom: 10,
   },
   title: {
     fontFamily: 'BarlowCondensed_900Black',
@@ -408,203 +389,194 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
-  // View mode toggle (Players | Groups)
-  viewToggle: {
+  // Players/Groups toggle
+  toggle: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(255,255,255,0.07)',
     borderRadius: 20,
     padding: 3,
   },
-  viewBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
+  toggleBtn: {
+    paddingHorizontal: 14,
     paddingVertical: 6,
-    borderRadius: 18,
+    borderRadius: 17,
   },
-  viewBtnActive: { backgroundColor: AMBER },
-  viewBtnText: {
+  toggleBtnActive: { backgroundColor: AMBER },
+  toggleTxt: {
     fontFamily: 'Rajdhani_600SemiBold',
-    fontSize: 12,
+    fontSize: 13,
     color: 'rgba(255,255,255,0.45)',
   },
-  viewBtnTextActive: { color: '#0e0e10' },
+  toggleTxtActive: { color: '#0e0e10', fontWeight: '700' },
 
-  // Sort toggle (Points | Parcels)
+  // Sort chips
   sortRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingBottom: 10,
-    gap: 10,
+    gap: 8,
   },
   sortLabel: {
     fontFamily: 'Rajdhani_600SemiBold',
     fontSize: 12,
     color: 'rgba(255,255,255,0.3)',
   },
-  sortToggle: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 16,
-    padding: 2,
-  },
-  sortBtn: {
+  sortChip: {
     paddingHorizontal: 12,
     paddingVertical: 4,
-    borderRadius: 14,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
-  sortBtnActive: { backgroundColor: 'rgba(255,255,255,0.12)' },
-  sortBtnText: {
+  sortChipActive: { backgroundColor: 'rgba(255,255,255,0.14)' },
+  sortChipTxt: {
     fontFamily: 'Rajdhani_600SemiBold',
-    fontSize: 11,
+    fontSize: 12,
     color: 'rgba(255,255,255,0.35)',
   },
-  sortBtnTextActive: { color: '#fff' },
+  sortChipTxtActive: { color: '#fff' },
 
-  // Group hint
-  groupHint: {
+  // Column header row — mirrors the row layout
+  colRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
     paddingHorizontal: 16,
-    paddingBottom: 10,
-  },
-  groupHintText: {
-    fontFamily: 'Rajdhani_600SemiBold',
-    fontSize: 11,
-    color: 'rgba(255,255,255,0.25)',
-  },
-
-  // Column headers
-  colHeaders: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingBottom: 8,
+    paddingBottom: 6,
     borderBottomWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: 'rgba(255,255,255,0.07)',
   },
-  colHeader: {
+  colTxt: {
     fontFamily: 'Rajdhani_600SemiBold',
     fontSize: 9,
     letterSpacing: 1.5,
     color: 'rgba(255,255,255,0.3)',
     textTransform: 'uppercase',
   },
+  colTxtRight: { textAlign: 'right' },
 
   list: { paddingBottom: 100 },
 
-  // Player row
+  // ── Row ────────────────────────────────────────────────────────────────────
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 11,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderColor: 'rgba(255,255,255,0.04)',
   },
   rowMe: {
     backgroundColor: 'rgba(245,197,24,0.06)',
-    borderColor: 'rgba(245,197,24,0.12)',
+    borderColor: 'rgba(245,197,24,0.1)',
   },
-  rowPressed: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-  },
-  groupRow: {
-    borderColor: 'rgba(255,255,255,0.04)',
-  },
+  rowPressed: { backgroundColor: 'rgba(255,255,255,0.04)' },
 
-  rankCell: { width: 40, alignItems: 'center' },
+  // Rank cell
+  rankCell: { width: 36, alignItems: 'center' },
   rankNum: {
     fontFamily: 'BarlowCondensed_900Black',
-    fontSize: 16,
+    fontSize: 15,
     color: 'rgba(255,255,255,0.25)',
   },
-  medal: { fontSize: 18 },
+  medal: { fontSize: 16 },
 
+  // Avatar
   avatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: 'rgba(255,255,255,0.08)',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 10,
+    flexShrink: 0,
   },
   avatarMe: { backgroundColor: AMBER },
-  avatarText: {
+  avatarTxt: {
     fontFamily: 'BarlowCondensed_900Black',
-    fontSize: 12,
+    fontSize: 11,
     color: 'rgba(255,255,255,0.7)',
-    lineHeight: 15,
+    lineHeight: 14,
   },
-  avatarTextMe: { color: '#0e0e10' },
+  avatarTxtMe: { color: '#0e0e10' },
 
+  // Group icon (same size as avatar for column alignment)
   groupIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: 'rgba(167,139,250,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 10,
+    flexShrink: 0,
     borderWidth: 1,
     borderColor: 'rgba(167,139,250,0.2)',
   },
 
-  nameBlock: { flex: 1, marginRight: 4 },
+  // Name block
+  nameBlock: {
+    flex: 1,
+    marginRight: 6,
+    minWidth: 0,   // allows text truncation inside flex
+  },
   username: {
     fontFamily: 'Rajdhani_600SemiBold',
     fontSize: 14,
     color: '#e5e7eb',
+    lineHeight: 17,
   },
   usernameMe: { color: AMBER },
   displayName: {
     fontFamily: 'Rajdhani_600SemiBold',
     fontSize: 11,
     color: 'rgba(255,255,255,0.35)',
-    marginTop: 1,
+    lineHeight: 14,
   },
   groupName: {
     fontFamily: 'BarlowCondensed_900Black',
-    fontSize: 16,
+    fontSize: 15,
     color: '#fff',
-    letterSpacing: 0.2,
+    lineHeight: 18,
   },
   groupMeta: {
     fontFamily: 'Rajdhani_600SemiBold',
     fontSize: 11,
     color: 'rgba(255,255,255,0.35)',
-    marginTop: 1,
+    lineHeight: 14,
   },
 
-  statBlock: { width: 76, alignItems: 'flex-end' },
-  statPrimary: {
+  // Stat columns — fixed width, right-aligned
+  statCol: {
+    width: COL_W,
+    alignItems: 'flex-end',
+    flexShrink: 0,
+  },
+  statColSecondary: {
+    width: COL_W2,
+  },
+  statValue: {
     fontFamily: 'BarlowCondensed_900Black',
     fontSize: 18,
-    color: '#fff',
+    color: '#ffffff',
     lineHeight: 21,
   },
-  statPrimaryMe: { color: AMBER },
-  statSecondary: {
+  statValueMe: { color: AMBER },
+  statValueDim: {
     fontFamily: 'BarlowCondensed_900Black',
-    fontSize: 14,
+    fontSize: 15,
     color: 'rgba(255,255,255,0.3)',
-    lineHeight: 16,
+    lineHeight: 18,
   },
-  groupPts: {
-    fontFamily: 'BarlowCondensed_900Black',
-    fontSize: 18,
-    color: '#a78bfa',
-    lineHeight: 21,
-  },
-  statSub: {
+  statLabel: {
     fontFamily: 'Rajdhani_600SemiBold',
     fontSize: 9,
-    color: 'rgba(255,255,255,0.2)',
+    color: 'rgba(255,255,255,0.22)',
     letterSpacing: 0.8,
+    textTransform: 'uppercase',
   },
 
+  // Empty state
   empty: { alignItems: 'center', paddingTop: 80, gap: 12 },
   emptyText: {
     fontFamily: 'Rajdhani_600SemiBold',

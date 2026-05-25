@@ -1,25 +1,25 @@
 import { router } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function HeroScreen() {
-  const insets = useSafeAreaInsets();
-
   return (
-    <View style={[styles.root, { paddingTop: Math.max(insets.top, 32) }]}>
-      {/* ── Wordmark ── */}
-      <View style={styles.heroBlock}>
+    <SafeAreaView style={styles.root}>
+      {/* ── Logo block — fills upper space ── */}
+      <View style={styles.heroArea}>
         <Text style={styles.wordmark}>parcel</Text>
         <Text style={styles.tagline}>claim your city</Text>
       </View>
 
-      {/* ── CTA buttons ── */}
-      <View style={styles.btnBlock}>
+      {/* ── CTA buttons — pinned to the bottom ── */}
+      <View style={styles.btnArea}>
         <Pressable
           style={({ pressed }) => [styles.btnPrimary, pressed && { opacity: 0.85 }]}
           onPress={() => router.push('/(auth)/sign-in')}>
           <Text style={styles.btnPrimaryText}>Sign in</Text>
         </Pressable>
+
+        <View style={styles.gap} />
 
         <Pressable
           style={({ pressed }) => [styles.btnSecondary, pressed && { opacity: 0.75 }]}
@@ -27,7 +27,7 @@ export default function HeroScreen() {
           <Text style={styles.btnSecondaryText}>Create account</Text>
         </Pressable>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -35,59 +35,64 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: '#0e0e10',
+    paddingHorizontal: 28,
+  },
+
+  // Hero occupies all space above the buttons
+  heroArea: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 32,
-  },
-  heroBlock: {
-    alignItems: 'center',
-    marginBottom: 56,
   },
   wordmark: {
     fontFamily: 'Syne_800ExtraBold',
-    fontSize: 60,
+    fontSize: 64,
     color: '#ffffff',
-    letterSpacing: -1,
+    letterSpacing: -2,
+    lineHeight: 72,
     textAlign: 'center',
-    lineHeight: 68,
   },
   tagline: {
     fontFamily: 'DMMono_400Regular',
-    fontSize: 16,
-    color: 'rgba(255,255,255,0.55)',
+    fontSize: 15,
+    color: 'rgba(255,255,255,0.5)',
     textAlign: 'center',
+    marginTop: 8,
   },
-  btnBlock: {
-    width: '100%',
-    maxWidth: 384,
-    gap: 12,
+
+  // Button block stays at the bottom of safe area
+  btnArea: {
+    paddingBottom: 20,
   },
+  gap: { height: 12 },
+
   btnPrimary: {
     backgroundColor: '#ffffff',
     borderRadius: 14,
-    paddingVertical: 16,
+    paddingVertical: 17,
     alignItems: 'center',
   },
   btnPrimaryText: {
     fontFamily: 'Rajdhani_600SemiBold',
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '700',
     color: '#0e0e10',
-    letterSpacing: 0.4,
+    letterSpacing: 0.5,
   },
+
   btnSecondary: {
     borderRadius: 14,
-    paddingVertical: 16,
+    paddingVertical: 17,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    borderColor: 'rgba(255,255,255,0.18)',
     backgroundColor: 'rgba(255,255,255,0.04)',
   },
   btnSecondaryText: {
     fontFamily: 'Rajdhani_600SemiBold',
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '600',
     color: '#ffffff',
-    letterSpacing: 0.4,
+    letterSpacing: 0.5,
   },
 });

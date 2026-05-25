@@ -88,7 +88,7 @@ export default function SignInScreen() {
 
         <Pressable
           style={({ pressed }) => [styles.btnSecondary, pressed && { opacity: 0.75 }]}
-          onPress={() => router.push('/(auth)/register')}
+          onPress={() => router.replace('/(auth)/register')}
           disabled={busy}>
           <Text style={styles.btnSecondaryText}>Create account</Text>
         </Pressable>

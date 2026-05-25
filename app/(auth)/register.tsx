@@ -121,9 +121,9 @@ export default function RegisterScreen() {
 
         <Pressable
           style={({ pressed }) => [styles.btnSecondary, pressed && { opacity: 0.75 }]}
-          onPress={() => router.back()}
+          onPress={() => router.replace('/(auth)/sign-in')}
           disabled={busy}>
-          <Text style={styles.btnSecondaryText}>Already have an account</Text>
+          <Text style={styles.btnSecondaryText}>Sign in instead</Text>
         </Pressable>
       </View>
     </KeyboardAvoidingView>
