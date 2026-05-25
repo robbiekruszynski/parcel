@@ -5,6 +5,8 @@ import { create } from 'zustand';
 export interface Parcel {
   id: string;
   owner_id: string;
+  /** Second owner for cooperative (50/50) claims. */
+  co_owner_id: string | null;
   /** [lat, lng] pairs — matches the jsonb storage format in Supabase. */
   coordinates: [number, number][];
   area_sqm: number;

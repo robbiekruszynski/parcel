@@ -24,6 +24,7 @@ import { supabase } from '@/lib/supabase';
 import { uploadSessionToStrava } from '@/lib/stravaUpload';
 import { useLocationStore } from '@/stores/locationStore';
 import { useParcelStore, type Parcel } from '@/stores/parcelStore';
+import { usePairStore } from '@/stores/pairStore';
 import { useStravaStore } from '@/stores/stravaStore';
 
 export type ActivityType = 'walking' | 'running' | 'cycling' | 'rollerblading';
@@ -33,6 +34,7 @@ export type ActivityType = 'walking' | 'running' | 'cycling' | 'rollerblading';
 interface ParcelRow {
   id: string;
   owner_id: string;
+  co_owner_id: string | null;
   coordinates: [number, number][] | null;
   area_sqm: number | null;
   claimed_at: string;
@@ -46,6 +48,7 @@ export function rowToParcel(row: ParcelRow): Parcel {
   return {
     id:                  row.id,
     owner_id:            row.owner_id,
+    co_owner_id:         row.co_owner_id ?? null,
     coordinates:         row.coordinates ?? [],
     area_sqm:            row.area_sqm ?? 0,
     claimed_at:          row.claimed_at,
@@ -93,7 +96,7 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
           const { data } = await supabase
             .from('parcels')
             .select(`
-              id, owner_id, coordinates, area_sqm, claimed_at,
+              id, owner_id, co_owner_id, coordinates, area_sqm, claimed_at,
               color, points, activity,
               profiles ( username, display_name )
             `)
@@ -119,7 +122,7 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
       const { data, error } = await supabase
         .from('parcels')
         .select(`
-          id, owner_id, coordinates, area_sqm, claimed_at,
+          id, owner_id, co_owner_id, coordinates, area_sqm, claimed_at,
           color, points, activity,
           profiles ( username, display_name )
         `)
@@ -162,18 +165,27 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     const coordinates  = routeToLatLngPairs(route);
     const area_sqm     = calculateAreaM2(route);
     const color        = userParcelColor(uid);
-    const initialPoints = Math.max(1, Math.round(area_sqm / 50));
+    const fullPoints   = Math.max(1, Math.round(area_sqm / 50));
+
+    // ── Cooperative claim? ────────────────────────────────────────────────
+    const { pairedUserId } = usePairStore.getState();
+    const isCoop   = pairedUserId !== null;
+    const ownerPts = isCoop ? Math.max(1, Math.floor(fullPoints / 2)) : fullPoints;
 
     const { data, error } = await supabase
       .from('parcels')
       .insert({
-        owner_id: uid, activity: activityType,
-        coordinates, area_sqm, color,
-        points: initialPoints,
-        claimed_at: new Date().toISOString(),
+        owner_id:    uid,
+        co_owner_id: pairedUserId ?? null,
+        activity:    activityType,
+        coordinates,
+        area_sqm,
+        color,
+        points:      ownerPts,
+        claimed_at:  new Date().toISOString(),
       })
       .select(`
-        id, owner_id, coordinates, area_sqm, claimed_at,
+        id, owner_id, co_owner_id, coordinates, area_sqm, claimed_at,
         color, points, activity,
         profiles ( username, display_name )
       `)
@@ -182,11 +194,22 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     if (error) throw new Error(error.message);
     if (data) useParcelStore.getState().addParcel(rowToParcel(data as unknown as ParcelRow));
 
-    // Credit profile points atomically
+    // Credit owner points
     const { error: ptErr } = await supabase.rpc('credit_parcel_points', {
-      p_uid: uid, p_points: initialPoints,
+      p_uid: uid, p_points: ownerPts,
     });
-    if (__DEV__ && ptErr) console.warn('[claimParcel] points credit failed:', ptErr.message);
+    if (__DEV__ && ptErr) console.warn('[claimParcel] owner points credit failed:', ptErr.message);
+
+    // Credit co-owner points (same amount)
+    if (isCoop && pairedUserId) {
+      const { error: coPtErr } = await supabase.rpc('credit_parcel_points', {
+        p_uid: pairedUserId, p_points: ownerPts,
+      });
+      if (__DEV__ && coPtErr) console.warn('[claimParcel] co-owner points credit failed:', coPtErr.message);
+    }
+
+    // Clear pair state after successful claim
+    usePairStore.getState().clearPairing();
 
     // Snapshot route before reset, then upload to Strava in background
     const snapshot = [...route];

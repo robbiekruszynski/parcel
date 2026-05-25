@@ -16,6 +16,7 @@
 
 import MapboxGL from '@rnmapbox/maps';
 import { router } from 'expo-router';
+import * as Location from 'expo-location';
 
 // Inline type — OnPressEvent is not re-exported from the main @rnmapbox/maps index
 type OnPressEvent = {
@@ -78,8 +79,30 @@ export function ParcelMap({ cameraRef: externalCameraRef, activityFilter }: Parc
   const isTracking     = useLocationStore((s) => s.isTracking);
   const isPaused       = useLocationStore((s) => s.isPaused);
 
-  // ── Fly to user on first fix ───────────────────────────────────────────────
+  // ── Centre map immediately on mount using device location ─────────────────
   const hasCenteredRef = useRef(false);
+  useEffect(() => {
+    void (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== Location.PermissionStatus.GRANTED) return;
+      // Last-known is instant; falls back to a fresh fix if unavailable
+      const loc =
+        (await Location.getLastKnownPositionAsync()) ??
+        (await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        }));
+      if (!loc || hasCenteredRef.current) return;
+      hasCenteredRef.current = true;
+      cameraRef.current?.setCamera({
+        centerCoordinate: [loc.coords.longitude, loc.coords.latitude],
+        zoomLevel: 15,
+        animationDuration: 600,
+        animationMode: 'flyTo',
+      });
+    })();
+  }, []);
+
+  // ── Keep following user while tracking ────────────────────────────────────
   useEffect(() => {
     if (position && !hasCenteredRef.current) {
       hasCenteredRef.current = true;
@@ -234,17 +257,12 @@ export function ParcelMap({ cameraRef: externalCameraRef, activityFilter }: Parc
           </MapboxGL.ShapeSource>
         )}
 
-        {/* ── User position marker ─────────────────────────────────────────── */}
-        {position && (
-          <MapboxGL.PointAnnotation
-            id="user-position"
-            coordinate={[position.lng, position.lat]}>
-            <View style={styles.markerWrap}>
-              <View style={styles.markerPulse} />
-              <View style={styles.markerDot} />
-            </View>
-          </MapboxGL.PointAnnotation>
-        )}
+        {/* ── User position — Mapbox native dot (accuracy ring included) ─── */}
+        <MapboxGL.UserLocation
+          visible
+          androidRenderMode="compass"
+          renderMode={MapboxGL.UserLocationRenderMode.Normal}
+        />
       </MapboxGL.MapView>
 
       {/* ── Locate-me button ──────────────────────────────────────────────── */}

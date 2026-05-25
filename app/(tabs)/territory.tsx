@@ -29,6 +29,7 @@ if (Platform.OS === 'android') {
 interface ParcelRow {
   id: string;
   owner_id: string;
+  co_owner_id?: string | null;
   coordinates: [number, number][] | null;
   area_sqm: number | null;
   claimed_at: string;
@@ -44,6 +45,7 @@ function rowToParcel(row: ParcelRow): Parcel {
   return {
     id: row.id,
     owner_id: row.owner_id,
+    co_owner_id: row.co_owner_id ?? null,
     coordinates: row.coordinates ?? [],
     area_sqm: row.area_sqm ?? 0,
     claimed_at: row.claimed_at,
@@ -214,6 +216,9 @@ function ParcelCard({
             {parcel.owner_display_name ? (
               <DetailRow label="OWNER" value={parcel.owner_display_name} />
             ) : null}
+            {parcel.co_owner_id ? (
+              <DetailRow label="CO-OWNER" value="Cooperative claim (50/50)" />
+            ) : null}
 
             {/* View route button */}
             <Pressable
@@ -255,7 +260,7 @@ export default function TerritoryScreen() {
         supabase
           .from('parcels')
           .select(
-            'id, owner_id, coordinates, area_sqm, claimed_at, color, points, activity, profiles(username, display_name)'
+            'id, owner_id, co_owner_id, coordinates, area_sqm, claimed_at, color, points, activity, profiles(username, display_name)'
           )
           .not('coordinates', 'is', null)
           .order('claimed_at', { ascending: false })

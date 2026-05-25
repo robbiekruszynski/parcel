@@ -11,6 +11,7 @@
  * Wire up with useParcelTracking — pass the returned values straight through.
  */
 
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,6 +26,11 @@ export interface ParcelRecordingOverlayProps {
   loopClosed: boolean;
   distanceM: number;
   areaM2: number | null;
+
+  /** Set when a cooperative pair is confirmed — shows the partner badge. */
+  pairedUsername?: string | null;
+  /** Called when user taps the PAIR button to open the partner-search modal. */
+  onPairPress?: () => void;
 
   onStart: () => Promise<void> | void;
   onPause: () => void;
@@ -48,6 +54,8 @@ export function ParcelRecordingOverlay({
   loopClosed,
   distanceM,
   areaM2,
+  pairedUsername,
+  onPairPress,
   onStart,
   onPause,
   onResume,
@@ -166,6 +174,38 @@ export function ParcelRecordingOverlay({
             />
           )}
         </View>
+
+        {/* ── Cooperative pair badge / button ────────────────────────────────── */}
+        {pairedUsername ? (
+          <PairedBadge username={pairedUsername} />
+        ) : (
+          !loopClosed && onPairPress && (
+            <Pressable
+              onPress={onPairPress}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                paddingVertical: 10,
+                marginBottom: 14,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: 'rgba(255,255,255,0.12)',
+                backgroundColor: 'rgba(255,255,255,0.04)',
+              }}>
+              <MaterialCommunityIcons name="account-plus-outline" size={16} color="rgba(255,255,255,0.5)" />
+              <Text style={{
+                fontFamily: FONT,
+                fontSize: 13,
+                letterSpacing: 1.5,
+                color: 'rgba(255,255,255,0.5)',
+              }}>
+                PAIR WITH A PARTNER
+              </Text>
+            </Pressable>
+          )
+        )}
 
         {/* ── Loop closed → CLAIM button ──────────────────────────────────── */}
         {loopClosed && (
@@ -302,6 +342,35 @@ function StatBox({
           fontWeight: '700',
         }}>
         {value}
+      </Text>
+    </View>
+  );
+}
+
+function PairedBadge({ username }: { username: string }) {
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        paddingVertical: 9,
+        marginBottom: 14,
+        borderRadius: 12,
+        borderWidth: 1,
+        backgroundColor: 'rgba(99,220,150,0.08)',
+        borderColor: 'rgba(99,220,150,0.3)',
+      }}>
+      <MaterialCommunityIcons name="account-check" size={15} color="#63dc96" />
+      <Text style={{
+        fontFamily: FONT,
+        fontSize: 12,
+        letterSpacing: 1.8,
+        color: '#63dc96',
+        fontWeight: '700',
+      }}>
+        PAIRED WITH @{username}
       </Text>
     </View>
   );
