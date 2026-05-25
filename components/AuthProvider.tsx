@@ -85,7 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (session && (inAuthGroup || onEmailCallback)) {
-      router.replace('/(tabs)');
+      router.replace('/(tabs)/map');
     }
   }, [session, initializing, segments, router]);
 

@@ -6,6 +6,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  StyleSheet,
   Text,
   TextInput,
   View,
@@ -46,25 +47,17 @@ export default function SignInScreen() {
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      className="flex-1 bg-parcel-bg-dark">
-      <View className="flex-1 justify-center px-8">
-        <Text
-          className="mb-2 text-center text-3xl text-white"
-          style={{ fontFamily: 'Syne_800ExtraBold', letterSpacing: -1 }}>
-          sign in
-        </Text>
-        <Text
-          className="mb-8 text-center text-sm text-white/45"
-          style={{ fontFamily: 'DMMono_400Regular' }}>
-          use your parcel account
-        </Text>
+      style={styles.root}>
+      <View style={styles.inner}>
+        <Text style={styles.heading}>sign in</Text>
+        <Text style={styles.subheading}>use your parcel account</Text>
 
         <TextInput
           value={email}
           onChangeText={setEmail}
           placeholder="email"
           placeholderTextColor="rgba(255,255,255,0.35)"
-          className="mb-3 rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-white"
+          style={styles.input}
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="email-address"
@@ -76,7 +69,7 @@ export default function SignInScreen() {
           onChangeText={setPassword}
           placeholder="password"
           placeholderTextColor="rgba(255,255,255,0.35)"
-          className="mb-6 rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-white"
+          style={[styles.input, styles.inputLast]}
           secureTextEntry
           autoComplete="off"
           textContentType="none"
@@ -85,23 +78,92 @@ export default function SignInScreen() {
         />
 
         <Pressable
-          className="mb-3 rounded-xl bg-white py-4"
+          style={({ pressed }) => [styles.btnPrimary, pressed && { opacity: 0.85 }]}
           onPress={() => void onSignIn()}
           disabled={busy}>
-          {busy ? (
-            <ActivityIndicator color="#0b0d12" />
-          ) : (
-            <Text className="text-center font-semibold text-parcel-bg-dark">Sign in</Text>
-          )}
+          {busy
+            ? <ActivityIndicator color="#0b0d12" />
+            : <Text style={styles.btnPrimaryText}>Sign in</Text>}
         </Pressable>
 
         <Pressable
-          className="rounded-xl border border-white/25 py-4"
+          style={({ pressed }) => [styles.btnSecondary, pressed && { opacity: 0.75 }]}
           onPress={() => router.push('/(auth)/register')}
           disabled={busy}>
-          <Text className="text-center font-semibold text-white">Create account</Text>
+          <Text style={styles.btnSecondaryText}>Create account</Text>
         </Pressable>
       </View>
     </KeyboardAvoidingView>
   );
 }
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: '#0e0e10',
+  },
+  inner: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  heading: {
+    fontFamily: 'Syne_800ExtraBold',
+    fontSize: 30,
+    color: '#ffffff',
+    letterSpacing: -1,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  subheading: {
+    fontFamily: 'DMMono_400Regular',
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.45)',
+    textAlign: 'center',
+    marginBottom: 32,
+  },
+  input: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: '#ffffff',
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 15,
+    marginBottom: 12,
+  },
+  inputLast: {
+    marginBottom: 24,
+  },
+  btnPrimary: {
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  btnPrimaryText: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0e0e10',
+    letterSpacing: 0.4,
+  },
+  btnSecondary: {
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  btnSecondaryText: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+    letterSpacing: 0.4,
+  },
+});

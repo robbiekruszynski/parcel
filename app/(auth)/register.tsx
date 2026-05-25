@@ -6,6 +6,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  StyleSheet,
   Text,
   TextInput,
   View,
@@ -62,20 +63,16 @@ export default function RegisterScreen() {
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      className="flex-1 bg-parcel-bg-dark">
-      <View className="flex-1 justify-center px-8">
-        <Text
-          className="mb-6 text-center text-3xl text-white"
-          style={{ fontFamily: 'Syne_800ExtraBold', letterSpacing: -1 }}>
-          create account
-        </Text>
+      style={styles.root}>
+      <View style={styles.inner}>
+        <Text style={styles.heading}>create account</Text>
 
         <TextInput
           value={email}
           onChangeText={setEmail}
           placeholder="email"
           placeholderTextColor="rgba(255,255,255,0.35)"
-          className="mb-3 rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-white"
+          style={styles.input}
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="email-address"
@@ -87,7 +84,7 @@ export default function RegisterScreen() {
           onChangeText={setPassword}
           placeholder="password (6+ characters)"
           placeholderTextColor="rgba(255,255,255,0.35)"
-          className="mb-3 rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-white"
+          style={styles.input}
           secureTextEntry
           autoComplete="off"
           textContentType="none"
@@ -99,7 +96,7 @@ export default function RegisterScreen() {
           onChangeText={setUsername}
           placeholder="username"
           placeholderTextColor="rgba(255,255,255,0.35)"
-          className="mb-3 rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-white"
+          style={styles.input}
           autoCapitalize="none"
           autoCorrect={false}
           editable={!busy}
@@ -109,25 +106,90 @@ export default function RegisterScreen() {
           onChangeText={setDisplayName}
           placeholder="display name (optional)"
           placeholderTextColor="rgba(255,255,255,0.35)"
-          className="mb-6 rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-white"
+          style={[styles.input, styles.inputLast]}
           editable={!busy}
         />
 
         <Pressable
-          className="mb-3 rounded-xl bg-parcel-gold py-4"
+          style={({ pressed }) => [styles.btnPrimary, pressed && { opacity: 0.85 }]}
           onPress={() => void onRegister()}
           disabled={busy}>
-          {busy ? (
-            <ActivityIndicator color="#0b0d12" />
-          ) : (
-            <Text className="text-center font-semibold text-parcel-bg-dark">Create account</Text>
-          )}
+          {busy
+            ? <ActivityIndicator color="#0b0d12" />
+            : <Text style={styles.btnPrimaryText}>Create account</Text>}
         </Pressable>
 
-        <Pressable className="rounded-xl border border-white/25 py-4" onPress={() => router.back()} disabled={busy}>
-          <Text className="text-center font-semibold text-white">Already have an account</Text>
+        <Pressable
+          style={({ pressed }) => [styles.btnSecondary, pressed && { opacity: 0.75 }]}
+          onPress={() => router.back()}
+          disabled={busy}>
+          <Text style={styles.btnSecondaryText}>Already have an account</Text>
         </Pressable>
       </View>
     </KeyboardAvoidingView>
   );
 }
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: '#0e0e10',
+  },
+  inner: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  heading: {
+    fontFamily: 'Syne_800ExtraBold',
+    fontSize: 30,
+    color: '#ffffff',
+    letterSpacing: -1,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  input: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: '#ffffff',
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 15,
+    marginBottom: 12,
+  },
+  inputLast: {
+    marginBottom: 24,
+  },
+  btnPrimary: {
+    backgroundColor: '#f5c518',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  btnPrimaryText: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0e0e10',
+    letterSpacing: 0.4,
+  },
+  btnSecondary: {
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  btnSecondaryText: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+    letterSpacing: 0.4,
+  },
+});

@@ -10,6 +10,7 @@ export default function TabLayout() {
   return (
     <View style={{ flex: 1 }}>
       <Tabs
+        initialRouteName="map"
         screenOptions={{
           tabBarStyle: { display: 'none' },
           headerShown: false,
