@@ -72,8 +72,24 @@ export function useStravaAuth() {
     await exchangeCodeForTokens(code);
   }, [appReturnUri, exchangeCodeForTokens, stravaRedirectUri]);
 
+  // ── Sign in WITH Strava (creates / links a parcel account) ──────────────
+  const signInWithStrava = useCallback(async () => {
+    if (!STRAVA_CLIENT_ID) {
+      throw new Error('Add EXPO_PUBLIC_STRAVA_CLIENT_ID to .env and restart Expo.');
+    }
+    const signInRedirectUri = buildStravaRedirectUri('sign_in');
+    const authUrl = buildStravaAuthorizeUrl(signInRedirectUri);
+    const result = await WebBrowser.openAuthSessionAsync(authUrl, appReturnUri);
+    if (result.type === 'cancel' || result.type === 'dismiss') {
+      throw new Error('Strava authorisation was cancelled');
+    }
+    // Deep-link is picked up by app/strava-auth.tsx → completeStravaSignIn.
+    // Auth state updates via onAuthStateChange — nothing else needed here.
+  }, [appReturnUri]);
+
   return {
     connectStrava,
+    signInWithStrava,
     exchangeCodeForTokens,
     appReturnUri,
     stravaRedirectUri,

@@ -5,11 +5,11 @@ import { Animated, PanResponder, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const NAV_ITEMS = [
-  { name: 'map',         icon: 'map'    as const, label: 'Map'         },
-  { name: 'territory',   icon: 'flag'   as const, label: 'Territory'   },
-  { name: 'profile',     icon: 'user'   as const, label: 'Profile'     },
-  { name: 'leaderboard', icon: 'trophy' as const, label: 'Leaderboard' },
-  { name: 'group',       icon: 'users'  as const, label: 'Group'       },
+  { name: 'map',         icon: 'map'    as const, label: 'Map'      },
+  { name: 'territory',   icon: 'flag'   as const, label: 'Territory'},
+  { name: 'profile',     icon: 'user'   as const, label: 'Profile'  },
+  { name: 'leaderboard', icon: 'trophy' as const, label: 'Rankings' },
+  { name: 'group',       icon: 'users'  as const, label: 'Group'    },
 ];
 
 const CONTENT_H = 90;
@@ -124,6 +124,8 @@ export function NavSheet() {
                   color={active ? '#f5c518' : 'rgba(255,255,255,0.38)'}
                 />
                 <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
                   style={{
                     fontFamily: 'Rajdhani_600SemiBold',
                     fontSize: 10,

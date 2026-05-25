@@ -1,9 +1,8 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  Animated,
   FlatList,
   LayoutAnimation,
   Platform,
@@ -215,6 +214,14 @@ function ParcelCard({
             {parcel.owner_display_name ? (
               <DetailRow label="OWNER" value={parcel.owner_display_name} />
             ) : null}
+
+            {/* View route button */}
+            <Pressable
+              style={styles.viewRouteBtn}
+              onPress={() => router.push(`/parcel/${parcel.id}`)}>
+              <MaterialCommunityIcons name="map-outline" size={14} color="#f5c518" style={{ marginRight: 6 }} />
+              <Text style={styles.viewRouteBtnText}>VIEW ROUTE ON MAP</Text>
+            </Pressable>
           </View>
         )}
       </View>
@@ -466,6 +473,25 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     flex: 1,
     marginLeft: 16,
+  },
+
+  // View route button
+  viewRouteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(245,197,24,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,197,24,0.25)',
+  },
+  viewRouteBtnText: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 11,
+    letterSpacing: 1.5,
+    color: '#f5c518',
   },
 
   // Empty state

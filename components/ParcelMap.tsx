@@ -15,6 +15,7 @@
  */
 
 import MapboxGL from '@rnmapbox/maps';
+import { router } from 'expo-router';
 
 // Inline type — OnPressEvent is not re-exported from the main @rnmapbox/maps index
 type OnPressEvent = {
@@ -322,9 +323,21 @@ function ParcelDetailSheet({
           />
         </View>
 
-        <Pressable style={styles.closeBtn} onPress={onClose}>
-          <Text style={styles.closeBtnText}>Close</Text>
-        </Pressable>
+        <View style={styles.sheetActions}>
+          <Pressable
+            style={[styles.closeBtn, { flex: 1 }]}
+            onPress={onClose}>
+            <Text style={styles.closeBtnText}>Close</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.viewDetailsBtn, { flex: 1 }]}
+            onPress={() => {
+              onClose();
+              router.push(`/parcel/${parcel.id}`);
+            }}>
+            <Text style={styles.viewDetailsBtnText}>View Route</Text>
+          </Pressable>
+        </View>
       </Pressable>
     </Pressable>
   );
@@ -467,6 +480,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
   },
+  sheetActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
   closeBtn: {
     paddingVertical: 14,
     borderRadius: 12,
@@ -479,6 +496,20 @@ const styles = StyleSheet.create({
     fontFamily: FONT_LABEL,
     fontSize: 15,
     color: 'rgba(255,255,255,0.6)',
+    letterSpacing: 0.5,
+  },
+  viewDetailsBtn: {
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: 'rgba(245,197,24,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,197,24,0.3)',
+  },
+  viewDetailsBtnText: {
+    fontFamily: FONT_LABEL,
+    fontSize: 15,
+    color: '#f5c518',
     letterSpacing: 0.5,
   },
 });
