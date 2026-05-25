@@ -4,9 +4,9 @@ import { TRACKING } from '@/constants/trackingTheme';
 
 export function TrackingStatsRow() {
   return (
-    <View className="flex-row items-stretch justify-between px-5 pb-3">
-      <View className="flex-1">
-        <View className="flex-row items-baseline">
+    <View style={{ flexDirection: 'row', alignItems: 'stretch', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 12 }}>
+      <View style={{ flex: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
           <Text
             style={{
               color: TRACKING.white,
@@ -43,7 +43,7 @@ export function TrackingStatsRow() {
 
       <View style={{ width: 1, backgroundColor: TRACKING.borderSubtle, marginHorizontal: 14 }} />
 
-      <View className="flex-1 items-end">
+      <View style={{ flex: 1, alignItems: 'flex-end' }}>
         <Text
           style={{
             color: TRACKING.amber,

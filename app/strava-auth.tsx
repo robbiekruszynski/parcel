@@ -48,7 +48,7 @@ export default function StravaAuthCallbackScreen() {
 
         await completeStravaSignIn(code, buildStravaRedirectUri('sign_in'));
         setMessage('Signed in with Strava');
-        router.replace('/(tabs)');
+        router.replace('/(tabs)/map');
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Could not complete Strava auth';
         Alert.alert(intent === 'connect' ? 'Strava connection failed' : 'Strava sign-in failed', msg);
@@ -58,9 +58,11 @@ export default function StravaAuthCallbackScreen() {
   }, [exchangeCodeForTokens, params.code, params.error, params.intent]);
 
   return (
-    <View className="flex-1 items-center justify-center bg-parcel-bg-dark">
-      <ActivityIndicator color="#f97316" />
-      <Text className="mt-4 text-white">{message}</Text>
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0e0e10' }}>
+      <ActivityIndicator color="#FC4C02" />
+      <Text style={{ marginTop: 16, color: '#fff', fontFamily: 'Rajdhani_600SemiBold', fontSize: 15 }}>
+        {message}
+      </Text>
     </View>
   );
 }

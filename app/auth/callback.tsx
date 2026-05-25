@@ -27,9 +27,11 @@ export default function AuthCallbackScreen() {
   }, [url]);
 
   return (
-    <View className="flex-1 items-center justify-center bg-parcel-bg-dark px-8">
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0e0e10', paddingHorizontal: 32 }}>
       <ActivityIndicator size="large" color="#f5c518" />
-      <Text className="mt-6 text-center text-base text-white/70">{message}</Text>
+      <Text style={{ marginTop: 24, textAlign: 'center', fontSize: 15, color: 'rgba(255,255,255,0.65)', fontFamily: 'Rajdhani_600SemiBold' }}>
+        {message}
+      </Text>
     </View>
   );
 }

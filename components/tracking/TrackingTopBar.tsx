@@ -32,8 +32,8 @@ export function TrackingTopBar({ cyberDark, onToggleTheme }: Props) {
   }));
 
   return (
-    <View className="flex-row items-center justify-between px-4 pb-2 pt-1">
-      <View className="flex-row items-center gap-2">
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 8, paddingTop: 4 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <FontAwesome name="cube" size={14} color={TRACKING.white} />
         <Text
           style={{

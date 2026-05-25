@@ -4,7 +4,7 @@ import { TRACKING } from '@/constants/trackingTheme';
 
 export function TrackingLoopHintBar() {
   return (
-    <View className="absolute bottom-5 left-5 right-5 items-center">
+    <View style={{ position: 'absolute', bottom: 20, left: 20, right: 20, alignItems: 'center' }}>
       <View
         style={{
           flexDirection: 'row',

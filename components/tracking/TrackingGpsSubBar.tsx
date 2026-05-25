@@ -4,7 +4,7 @@ import { TRACKING } from '@/constants/trackingTheme';
 
 export function TrackingGpsSubBar() {
   return (
-    <View className="flex-row items-center justify-between px-5 pb-3 pt-0">
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 12 }}>
       <Text style={{ color: TRACKING.muted2, fontFamily: 'DMMono_400Regular', fontSize: 11 }}>GPS ▌▌▌</Text>
       <Text style={{ color: TRACKING.muted2, fontFamily: 'DMMono_400Regular', fontSize: 11 }}>3d ago</Text>
       <Text style={{ color: TRACKING.muted2, fontFamily: 'DMMono_400Regular', fontSize: 11 }}>5.4 MIN/KM</Text>

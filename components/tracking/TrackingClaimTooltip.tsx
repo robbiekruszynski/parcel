@@ -4,7 +4,7 @@ import { TRACKING } from '@/constants/trackingTheme';
 
 export function TrackingClaimTooltip() {
   return (
-    <View className="absolute left-0 right-0 top-[38%] items-center px-6" pointerEvents="none">
+    <View style={{ position: 'absolute', left: 0, right: 0, top: '38%', alignItems: 'center', paddingHorizontal: 24 }} pointerEvents="none">
       <View
         style={{
           backgroundColor: TRACKING.amber,

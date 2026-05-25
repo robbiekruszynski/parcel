@@ -1,24 +1,60 @@
 import { router } from 'expo-router';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 export default function SessionEndScreen() {
   return (
-    <View className="flex-1 justify-end bg-parcel-bg-dark pb-12">
-      <View className="rounded-t-3xl bg-parcel-bg-light p-6 dark:bg-neutral-900">
-        <Text
-          className="mb-2 text-2xl text-parcel-bg-dark dark:text-white"
-          style={{ fontFamily: 'Syne_800ExtraBold' }}>
-          session complete
-        </Text>
-        <Text className="mb-6 text-parcel-bg-dark/70 dark:text-white/60" style={{ fontFamily: 'DMMono_400Regular' }}>
+    <View style={styles.root}>
+      <View style={styles.sheet}>
+        <Text style={styles.title}>session complete</Text>
+        <Text style={styles.subtitle}>
           Replay + stats sheet — hook to session store next.
         </Text>
         <Pressable
-          className="rounded-xl bg-parcel-gold py-4"
+          style={({ pressed }) => [styles.btn, pressed && { opacity: 0.85 }]}
           onPress={() => router.replace('/(tabs)/profile')}>
-          <Text className="text-center font-semibold text-parcel-bg-dark">Done</Text>
+          <Text style={styles.btnText}>Done</Text>
         </Pressable>
       </View>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: '#0e0e10',
+    paddingBottom: 48,
+  },
+  sheet: {
+    backgroundColor: '#13131a',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 24,
+  },
+  title: {
+    fontFamily: 'Syne_800ExtraBold',
+    fontSize: 26,
+    color: '#ffffff',
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontFamily: 'DMMono_400Regular',
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.55)',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  btn: {
+    backgroundColor: '#f5c518',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  btnText: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0e0e10',
+  },
+});
