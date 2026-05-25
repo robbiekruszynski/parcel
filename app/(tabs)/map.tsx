@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ParcelMap } from '@/components/ParcelMap';
 import { ParcelRecordingOverlay } from '@/components/ParcelRecordingOverlay';
+import { StravaUploadToast } from '@/components/StravaUploadToast';
 import { usePairing } from '@/hooks/usePairing';
 import { useParcelTracking, type ActivityType } from '@/hooks/useParcelTracking';
 import { usePairStore } from '@/stores/pairStore';
@@ -163,6 +164,9 @@ export default function MapScreen() {
           onClose={() => setShowFindPartner(false)}
         />
       </Modal>
+
+      {/* ── Strava upload toast ───────────────────────────────────────────────── */}
+      <StravaUploadToast />
 
       {/* ── Help / FAQ button — stacked below the locate-me button ──────────── */}
       <Pressable

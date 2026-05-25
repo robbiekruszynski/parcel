@@ -155,9 +155,52 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     routeToUpload: typeof route,
     parcelsClaimed: number,
   ) => {
-    if (!useStravaStore.getState().isConnected) return;
+    const store = useStravaStore.getState();
+    if (!store.isConnected) return;
     if (routeToUpload.length < 2) return;
-    await uploadSessionToStrava(routeToUpload, activityType, parcelsClaimed);
+
+    // Wait for the initial DB sync to finish (max 4 s) before uploading.
+    // Prevents a race where the upload fires before tokens load on first launch.
+    if (!store.syncReady) {
+      await new Promise<void>((resolve) => {
+        const unsub = useStravaStore.subscribe((s) => {
+          if (s.syncReady) { unsub(); resolve(); }
+        });
+        setTimeout(() => { unsub(); resolve(); }, 4_000);
+      });
+    }
+
+    // Re-check after waiting — user might not be connected
+    if (!useStravaStore.getState().isConnected) return;
+
+    // Persist details so the toast can offer a retry
+    useStravaStore.getState().setLastUpload(routeToUpload, activityType, parcelsClaimed);
+    useStravaStore.getState().setUploadStatus('uploading');
+
+    const result = await uploadSessionToStrava(routeToUpload, activityType, parcelsClaimed);
+
+    if (result.success) {
+      useStravaStore.getState().setUploadStatus('success');
+      // Auto-dismiss success toast after 4 s
+      setTimeout(() => {
+        if (useStravaStore.getState().uploadStatus === 'success') {
+          useStravaStore.getState().clearUploadStatus();
+        }
+      }, 4_000);
+    } else if (result.notConnected) {
+      // Not connected — silent, nothing to show
+      useStravaStore.getState().clearUploadStatus();
+    } else if (result.needsReconnect) {
+      useStravaStore.getState().setUploadStatus(
+        'failed',
+        'Strava needs reconnecting — go to Profile → Account & Settings.',
+      );
+    } else {
+      useStravaStore.getState().setUploadStatus(
+        'failed',
+        result.error ?? 'Upload to Strava failed.',
+      );
+    }
   }, [activityType]);
 
   // ── Claim parcel ──────────────────────────────────────────────────────────
