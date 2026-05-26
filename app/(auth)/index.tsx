@@ -177,7 +177,34 @@ export default function AuthScreen() {
               editable={!busy}
             />
 
-            {mode === 'signup' && (
+            {mode === 'signin' ? (
+              <>
+                <Pressable
+                  style={({ pressed }) => [
+                    s.primaryBtn,
+                    (pressed || busy) && s.btnPressed,
+                    busy && s.btnDisabled,
+                  ]}
+                  onPress={() => void handleContinue()}
+                  disabled={busy}>
+                  {busy ? (
+                    <ActivityIndicator color="#0e0e10" size="small" />
+                  ) : (
+                    <Text style={s.primaryBtnTxt}>Sign In</Text>
+                  )}
+                </Pressable>
+
+                <Pressable
+                  style={({ pressed }) => [
+                    s.secondaryBtn,
+                    pressed && !busy && s.btnPressed,
+                  ]}
+                  onPress={() => switchMode('signup')}
+                  disabled={busy}>
+                  <Text style={s.secondaryBtnTxt}>Create Account</Text>
+                </Pressable>
+              </>
+            ) : (
               <>
                 <Text style={s.label}>Username</Text>
                 <TextInput
@@ -209,36 +236,33 @@ export default function AuthScreen() {
                   onSubmitEditing={() => void handleContinue()}
                   editable={!busy}
                 />
+
+                <Pressable
+                  style={({ pressed }) => [
+                    s.primaryBtn,
+                    (pressed || busy) && s.btnPressed,
+                    busy && s.btnDisabled,
+                  ]}
+                  onPress={() => void handleContinue()}
+                  disabled={busy}>
+                  {busy ? (
+                    <ActivityIndicator color="#0e0e10" size="small" />
+                  ) : (
+                    <Text style={s.primaryBtnTxt}>Create Account</Text>
+                  )}
+                </Pressable>
+
+                <Pressable
+                  style={({ pressed }) => [
+                    s.secondaryBtn,
+                    pressed && !busy && s.btnPressed,
+                  ]}
+                  onPress={() => switchMode('signin')}
+                  disabled={busy}>
+                  <Text style={s.secondaryBtnTxt}>Sign In</Text>
+                </Pressable>
               </>
             )}
-
-            {/* Primary CTA */}
-            <Pressable
-              style={({ pressed }) => [
-                s.continueBtn,
-                pressed && { opacity: 0.88 },
-                busy && { opacity: 0.6 },
-              ]}
-              onPress={() => void handleContinue()}
-              disabled={busy}>
-              {busy ? (
-                <ActivityIndicator color="#0e0e10" />
-              ) : (
-                <Text style={s.continueTxt}>
-                  {mode === 'signin' ? 'Sign In' : 'Create Account'}
-                </Text>
-              )}
-            </Pressable>
-
-            {/* Switch mode hint */}
-            <Text style={s.hint}>
-              {mode === 'signin' ? "Don't have an account? " : 'Already have one? '}
-              <Text
-                style={s.hintLink}
-                onPress={() => !busy && switchMode(mode === 'signin' ? 'signup' : 'signin')}>
-                {mode === 'signin' ? 'Create one' : 'Sign in'}
-              </Text>
-            </Text>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -335,37 +359,41 @@ const s = StyleSheet.create({
     marginBottom: 18,
   },
 
-  // Continue button
-  continueBtn: {
-    backgroundColor: AMBER,
+  primaryBtn: {
+    marginTop: 8,
+    marginBottom: 12,
     borderRadius: 14,
-    paddingVertical: 17,
+    backgroundColor: AMBER,
+    paddingVertical: 18,
     alignItems: 'center',
-    marginTop: 4,
-    marginBottom: 20,
-    shadowColor: AMBER,
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 8,
+    justifyContent: 'center',
+    minHeight: 56,
   },
-  continueTxt: {
+  primaryBtnTxt: {
     fontFamily: 'Rajdhani_600SemiBold',
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: '700',
     color: '#0e0e10',
-    letterSpacing: 0.5,
+    letterSpacing: 0.6,
   },
-
-  // Hint
-  hint: {
+  secondaryBtn: {
+    marginBottom: 20,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: AMBER,
+    backgroundColor: 'rgba(245,197,24,0.08)',
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
+  },
+  secondaryBtnTxt: {
     fontFamily: 'Rajdhani_600SemiBold',
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.3)',
-    textAlign: 'center',
-  },
-  hintLink: {
-    color: 'rgba(255,255,255,0.65)',
+    fontSize: 16,
     fontWeight: '700',
+    color: AMBER,
+    letterSpacing: 0.4,
   },
+  btnPressed: { opacity: 0.82 },
+  btnDisabled: { opacity: 0.55 },
 });
