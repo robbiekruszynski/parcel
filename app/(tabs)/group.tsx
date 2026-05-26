@@ -387,7 +387,7 @@ export default function GroupScreen() {
   // ── Realtime: refresh when any group_member row in my groups changes ──────
   useEffect(() => {
     const channel = supabase
-      .channel('group-members-live')
+      .channel(`group-members-live-${Date.now()}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'group_members' },

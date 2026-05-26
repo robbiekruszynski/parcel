@@ -80,7 +80,7 @@ export function usePairing() {
     };
 
     const channel = supabase
-      .channel('pair-requests-mine')
+      .channel(`pair-requests-mine-${Date.now()}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'pair_requests' }, handleInsert)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'pair_requests' }, handleUpdate)
       .subscribe();

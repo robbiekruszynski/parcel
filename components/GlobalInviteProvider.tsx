@@ -105,7 +105,7 @@ export function GlobalInviteProvider() {
   // ── Pair requests — global subscription ──────────────────────────────────
   useEffect(() => {
     const channel = supabase
-      .channel('global-pair-requests')
+      .channel(`global-pair-requests-${Date.now()}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'pair_requests' },
@@ -141,7 +141,7 @@ export function GlobalInviteProvider() {
   // ── Group invites — global subscription ──────────────────────────────────
   useEffect(() => {
     const channel = supabase
-      .channel('global-group-invites')
+      .channel(`global-group-invites-${Date.now()}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'group_invites' },

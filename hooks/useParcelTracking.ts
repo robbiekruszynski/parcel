@@ -26,6 +26,7 @@ import { useLocationStore } from '@/stores/locationStore';
 import { useParcelStore, type Parcel } from '@/stores/parcelStore';
 import { usePairStore } from '@/stores/pairStore';
 import { useStravaStore } from '@/stores/stravaStore';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 export type ActivityType = 'walking' | 'running' | 'cycling' | 'rollerblading';
 
@@ -88,9 +89,16 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
   }, [loopClosed, route]);
 
   // ── Realtime: pick up new parcels from other users ────────────────────────
+  const parcelChannelRef = useRef<RealtimeChannel | null>(null);
+
   useEffect(() => {
+    if (parcelChannelRef.current) {
+      void supabase.removeChannel(parcelChannelRef.current);
+      parcelChannelRef.current = null;
+    }
+
     const channel = supabase
-      .channel('parcels-global-inserts')
+      .channel(`parcels-global-inserts-${Date.now()}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'parcels' },
@@ -119,7 +127,14 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
       )
       .subscribe();
 
-    return () => { void supabase.removeChannel(channel); };
+    parcelChannelRef.current = channel;
+
+    return () => {
+      if (parcelChannelRef.current) {
+        void supabase.removeChannel(parcelChannelRef.current);
+        parcelChannelRef.current = null;
+      }
+    };
   }, []);
 
   // ── Load all parcels on mount ──────────────────────────────────────────────
