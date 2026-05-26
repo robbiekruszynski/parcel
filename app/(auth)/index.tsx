@@ -20,6 +20,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -177,34 +178,7 @@ export default function AuthScreen() {
               editable={!busy}
             />
 
-            {mode === 'signin' ? (
-              <>
-                <Pressable
-                  style={({ pressed }) => [
-                    s.primaryBtn,
-                    (pressed || busy) && s.btnPressed,
-                    busy && s.btnDisabled,
-                  ]}
-                  onPress={() => void handleContinue()}
-                  disabled={busy}>
-                  {busy ? (
-                    <ActivityIndicator color="#0e0e10" size="small" />
-                  ) : (
-                    <Text style={s.primaryBtnTxt}>Sign In</Text>
-                  )}
-                </Pressable>
-
-                <Pressable
-                  style={({ pressed }) => [
-                    s.secondaryBtn,
-                    pressed && !busy && s.btnPressed,
-                  ]}
-                  onPress={() => switchMode('signup')}
-                  disabled={busy}>
-                  <Text style={s.secondaryBtnTxt}>Create Account</Text>
-                </Pressable>
-              </>
-            ) : (
+            {mode === 'signup' && (
               <>
                 <Text style={s.label}>Username</Text>
                 <TextInput
@@ -236,33 +210,33 @@ export default function AuthScreen() {
                   onSubmitEditing={() => void handleContinue()}
                   editable={!busy}
                 />
-
-                <Pressable
-                  style={({ pressed }) => [
-                    s.primaryBtn,
-                    (pressed || busy) && s.btnPressed,
-                    busy && s.btnDisabled,
-                  ]}
-                  onPress={() => void handleContinue()}
-                  disabled={busy}>
-                  {busy ? (
-                    <ActivityIndicator color="#0e0e10" size="small" />
-                  ) : (
-                    <Text style={s.primaryBtnTxt}>Create Account</Text>
-                  )}
-                </Pressable>
-
-                <Pressable
-                  style={({ pressed }) => [
-                    s.secondaryBtn,
-                    pressed && !busy && s.btnPressed,
-                  ]}
-                  onPress={() => switchMode('signin')}
-                  disabled={busy}>
-                  <Text style={s.secondaryBtnTxt}>Sign In</Text>
-                </Pressable>
               </>
             )}
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => void handleContinue()}
+              disabled={busy}
+              style={s.actionBtnWrap}>
+              <View style={[s.actionBtn, busy && s.actionBtnBusy]}>
+                {busy ? (
+                  <ActivityIndicator color="#0e0e10" size="small" />
+                ) : (
+                  <Text style={s.actionBtnTxt}>
+                    {mode === 'signin' ? 'Log in' : 'Start'}
+                  </Text>
+                )}
+              </View>
+            </TouchableOpacity>
+
+            <Text style={s.switchHint}>
+              {mode === 'signin' ? "Don't have an account? " : 'Already have an account? '}
+              <Text
+                style={s.switchLink}
+                onPress={() => !busy && switchMode(mode === 'signin' ? 'signup' : 'signin')}>
+                {mode === 'signin' ? 'Sign up' : 'Log in'}
+              </Text>
+            </Text>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -359,41 +333,37 @@ const s = StyleSheet.create({
     marginBottom: 18,
   },
 
-  primaryBtn: {
+  actionBtnWrap: {
     marginTop: 8,
-    marginBottom: 12,
+    marginBottom: 16,
     borderRadius: 14,
+  },
+  actionBtn: {
     backgroundColor: AMBER,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: AMBER,
     paddingVertical: 18,
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 56,
   },
-  primaryBtnTxt: {
-    fontFamily: 'Rajdhani_600SemiBold',
+  actionBtnBusy: { opacity: 0.6 },
+  actionBtnTxt: {
+    fontFamily: 'Rajdhani_700Bold',
     fontSize: 18,
-    fontWeight: '700',
     color: '#0e0e10',
     letterSpacing: 0.6,
   },
-  secondaryBtn: {
-    marginBottom: 20,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: AMBER,
-    backgroundColor: 'rgba(245,197,24,0.08)',
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 52,
-  },
-  secondaryBtnTxt: {
+  switchHint: {
     fontFamily: 'Rajdhani_600SemiBold',
-    fontSize: 16,
-    fontWeight: '700',
-    color: AMBER,
-    letterSpacing: 0.4,
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.45)',
+    textAlign: 'center',
+    marginBottom: 8,
   },
-  btnPressed: { opacity: 0.82 },
-  btnDisabled: { opacity: 0.55 },
+  switchLink: {
+    color: AMBER,
+    fontFamily: 'Rajdhani_700Bold',
+  },
 });
