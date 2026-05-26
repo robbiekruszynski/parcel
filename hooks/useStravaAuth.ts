@@ -1,6 +1,8 @@
 import * as WebBrowser from 'expo-web-browser';
+import { router } from 'expo-router';
 import { useCallback, useMemo } from 'react';
 
+import { runStravaCodeOnce } from '@/lib/exchangeStravaCodeOnce';
 import { readSupabaseFunctionError } from '@/lib/stravaErrors';
 import {
   buildStravaAuthorizeUrl,
@@ -21,23 +23,25 @@ export function useStravaAuth() {
 
   const exchangeCodeForTokens = useCallback(
     async (code: string) => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (!session) throw new Error('Sign in to parcel before connecting Strava');
+      await runStravaCodeOnce(code, async () => {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!session) throw new Error('Sign in to parcel before connecting Strava');
 
-      const { data, error } = await supabase.functions.invoke('strava-token-exchange', {
-        body: { code, redirect_uri: stravaRedirectUri },
-        headers: { Authorization: `Bearer ${session.access_token}` },
+        const { data, error } = await supabase.functions.invoke('strava-token-exchange', {
+          body: { code, redirect_uri: stravaRedirectUri },
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+
+        if (error) {
+          throw new Error(
+            await readSupabaseFunctionError(error as { message: string; context?: Response })
+          );
+        }
+        if (!data?.access_token) throw new Error('Token exchange returned no access token');
+        setStravaTokens(data, session.user.id);
       });
-
-      if (error) {
-        throw new Error(
-          await readSupabaseFunctionError(error as { message: string; context?: Response })
-        );
-      }
-      if (!data?.access_token) throw new Error('Token exchange returned no access token');
-      setStravaTokens(data, session.user.id);
     },
     [stravaRedirectUri, setStravaTokens]
   );
@@ -69,8 +73,15 @@ export function useStravaAuth() {
       throw new Error('Strava did not return an authorization code');
     }
 
-    await exchangeCodeForTokens(code);
-  }, [appReturnUri, exchangeCodeForTokens, stravaRedirectUri]);
+    // Hand off to strava-auth — single place that exchanges the code (avoids double exchange).
+    router.replace({
+      pathname: '/strava-auth',
+      params: {
+        code,
+        intent: parsed.searchParams.get('intent') ?? 'connect',
+      },
+    });
+  }, [appReturnUri, stravaRedirectUri]);
 
   // ── Sign in WITH Strava (creates / links a parcel account) ──────────────
   const signInWithStrava = useCallback(async () => {

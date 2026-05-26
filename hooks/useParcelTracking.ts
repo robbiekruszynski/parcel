@@ -20,52 +20,18 @@ import {
   routeToLatLngPairs,
   userParcelColor,
 } from '@/lib/parcelGeometry';
+import { rowToParcel, type ParcelRow } from '@/lib/parcelRow';
+import { subscribeParcelInserts } from '@/lib/subscribeParcelInserts';
 import { supabase } from '@/lib/supabase';
 import { uploadSessionToStrava } from '@/lib/stravaUpload';
 import { useLocationStore } from '@/stores/locationStore';
 import { useParcelStore, type Parcel } from '@/stores/parcelStore';
 import { usePairStore } from '@/stores/pairStore';
 import { useStravaStore } from '@/stores/stravaStore';
-import type { RealtimeChannel } from '@supabase/supabase-js';
 
 export type ActivityType = 'walking' | 'running' | 'cycling' | 'rollerblading';
 
-// ─── Row shape returned from Supabase ─────────────────────────────────────────
-
-interface ParcelRow {
-  id: string;
-  owner_id: string;
-  co_owner_id: string | null;
-  co_owners: string[] | null;
-  group_id: string | null;
-  coordinates: [number, number][] | null;
-  area_sqm: number | null;
-  claimed_at: string;
-  color: string | null;
-  points: number | null;
-  activity: string | null;
-  profiles: { username: string | null; display_name: string | null } | null;
-  groups: { name: string | null } | null;
-}
-
-export function rowToParcel(row: ParcelRow): Parcel {
-  return {
-    id:                  row.id,
-    owner_id:            row.owner_id,
-    co_owner_id:         row.co_owner_id ?? null,
-    co_owners:           row.co_owners ?? [],
-    group_id:            row.group_id ?? null,
-    group_name:          row.groups?.name ?? null,
-    coordinates:         row.coordinates ?? [],
-    area_sqm:            row.area_sqm ?? 0,
-    claimed_at:          row.claimed_at,
-    color:               row.color ?? '#f5c518',
-    points:              row.points ?? 0,
-    activity:            row.activity ?? 'walking',
-    owner_username:      row.profiles?.username ?? null,
-    owner_display_name:  row.profiles?.display_name ?? null,
-  };
-}
+export { rowToParcel } from '@/lib/parcelRow';
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
@@ -88,54 +54,8 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     try { return calculateAreaM2(route); } catch { return null; }
   }, [loopClosed, route]);
 
-  // ── Realtime: pick up new parcels from other users ────────────────────────
-  const parcelChannelRef = useRef<RealtimeChannel | null>(null);
-
-  useEffect(() => {
-    if (parcelChannelRef.current) {
-      void supabase.removeChannel(parcelChannelRef.current);
-      parcelChannelRef.current = null;
-    }
-
-    const channel = supabase
-      .channel(`parcels-global-inserts-${Date.now()}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'parcels' },
-        async (payload) => {
-          const newRow = payload.new as Partial<ParcelRow>;
-          if (!newRow.id) return;
-
-          // Re-fetch with profiles join (realtime payload lacks joined tables)
-          const { data } = await supabase
-            .from('parcels')
-            .select(`
-              id, owner_id, co_owner_id, co_owners, group_id, coordinates, area_sqm, claimed_at,
-              color, points, activity,
-              profiles ( username, display_name ),
-              groups ( name )
-            `)
-            .eq('id', newRow.id)
-            .single();
-
-          if (data) {
-            useParcelStore.getState().addParcel(
-              rowToParcel(data as unknown as ParcelRow)
-            );
-          }
-        }
-      )
-      .subscribe();
-
-    parcelChannelRef.current = channel;
-
-    return () => {
-      if (parcelChannelRef.current) {
-        void supabase.removeChannel(parcelChannelRef.current);
-        parcelChannelRef.current = null;
-      }
-    };
-  }, []);
+  // ── Realtime: pick up new parcels from other users (single global subscription)
+  useEffect(() => subscribeParcelInserts(), []);
 
   // ── Load all parcels on mount ──────────────────────────────────────────────
   const loadParcels = useCallback(async () => {

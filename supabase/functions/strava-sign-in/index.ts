@@ -37,8 +37,24 @@ async function findOrCreateStravaParcelUser(
     return { userId: user.id, email: user.email };
   }
 
-  // No connection record — try to create a fresh user
   const email = stravaParcelEmail(athlete.id);
+
+  // Returning Strava-only account (auth user exists but connection row was removed)
+  const { data: existingByEmail, error: emailLookupError } =
+    await supabaseAdmin.auth.admin.getUserByEmail(email);
+
+  if (existingByEmail?.user?.email) {
+    return { userId: existingByEmail.user.id, email: existingByEmail.user.email };
+  }
+
+  if (
+    emailLookupError &&
+    !/not found|user not found/i.test(emailLookupError.message)
+  ) {
+    throw new Error(emailLookupError.message);
+  }
+
+  // Brand-new Strava user
   const username = sanitizeUsername(`${athlete.firstname ?? 'athlete'}_${athlete.id}`, athlete.id);
   const displayName = `${athlete.firstname ?? ''} ${athlete.lastname ?? ''}`.trim() || null;
 
@@ -48,20 +64,16 @@ async function findOrCreateStravaParcelUser(
     user_metadata: { username, display_name: displayName, strava_athlete_id: athlete.id },
   });
 
-  if (newUser?.user) {
-    return { userId: newUser.user.id, email };
+  if (newUser?.user?.email) {
+    return { userId: newUser.user.id, email: newUser.user.email };
   }
 
-  // User already exists in auth but has no strava_connections record (partial previous sign-in).
-  // Page through users to find them by their deterministic email.
-  let page = 1;
-  while (true) {
-    const { data: listed } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 50 });
-    if (!listed?.users?.length) break;
-    const found = listed.users.find((u) => u.email?.toLowerCase() === email.toLowerCase());
-    if (found) return { userId: found.id, email: found.email! };
-    if (listed.users.length < 50) break;
-    page++;
+  // createUser raced or connection was deleted — resolve by email lookup
+  if (createError?.message?.includes('already been registered')) {
+    const { data: retryByEmail } = await supabaseAdmin.auth.admin.getUserByEmail(email);
+    if (retryByEmail?.user?.email) {
+      return { userId: retryByEmail.user.id, email: retryByEmail.user.email };
+    }
   }
 
   throw new Error(createError?.message ?? 'Could not find or create Strava user');

@@ -11,6 +11,10 @@ export function formatStravaError(raw: string): string {
     return 'STRAVA_CLIENT_SECRET in Supabase secrets is still the placeholder. Set your real secret from strava.com/settings/api.';
   }
 
+  if (/already been registered|already registered/i.test(raw)) {
+    return 'Your Strava account is already on Parcel. Log in with your email and password, then connect Strava in Profile → Settings.';
+  }
+
   try {
     const parsed = JSON.parse(raw) as {
       message?: string;
@@ -29,6 +33,14 @@ export function formatStravaError(raw: string): string {
     if (parsed.message) return parsed.message;
   } catch {
     // not JSON — fall through
+  }
+
+  if (/already been used|invalid authorization code|code expired/i.test(raw)) {
+    return 'Strava authorization expired — tap Connect Strava and try again.';
+  }
+
+  if (raw.includes('Bad Request') || raw.includes('bad request')) {
+    return 'Strava rejected the request — tap Connect Strava and try again once. If it keeps failing, disconnect and reconnect in Settings.';
   }
 
   if (raw.includes('Authorization Error')) {

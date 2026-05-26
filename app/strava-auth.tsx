@@ -5,6 +5,7 @@ import { ActivityIndicator, Alert, Text, View } from 'react-native';
 import { completeStravaSignIn } from '@/lib/completeStravaSignIn';
 import { buildStravaRedirectUri } from '@/lib/stravaOAuth';
 import { useStravaAuth } from '@/hooks/useStravaAuth';
+import { useStravaStore } from '@/stores/stravaStore';
 
 export default function StravaAuthCallbackScreen() {
   const params = useLocalSearchParams<{
@@ -40,6 +41,10 @@ export default function StravaAuthCallbackScreen() {
 
       try {
         if (intent === 'connect') {
+          if (useStravaStore.getState().isConnected) {
+            router.replace('/settings');
+            return;
+          }
           await exchangeCodeForTokens(code);
           setMessage('Strava connected');
           router.replace('/settings');
