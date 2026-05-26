@@ -207,7 +207,7 @@ function ParcelCard({
 
 // ─── Settings footer ───────────────────────────────────────────────────────────
 
-function SettingsFooter({ onSignOut }: { onSignOut: () => void }) {
+function SettingsFooter() {
   return (
     <View style={styles.settingsSection}>
       {/* Section label */}
@@ -237,12 +237,6 @@ function SettingsFooter({ onSignOut }: { onSignOut: () => void }) {
         <FontAwesome name="sliders" size={15} color="rgba(255,255,255,0.5)" style={{ marginRight: 10 }} />
         <Text style={styles.settingsLinkText}>Account &amp; settings</Text>
         <FontAwesome name="chevron-right" size={12} color="rgba(255,255,255,0.2)" style={{ marginLeft: 'auto' }} />
-      </Pressable>
-
-      {/* Sign out */}
-      <Pressable style={styles.signOutBtn} onPress={onSignOut}>
-        <FontAwesome name="sign-out" size={15} color="#ef4444" style={{ marginRight: 10 }} />
-        <Text style={styles.signOutText}>Sign out</Text>
       </Pressable>
     </View>
   );
@@ -387,7 +381,7 @@ export default function ProfileScreen() {
             </Text>
           )
         }
-        ListFooterComponent={<SettingsFooter onSignOut={handleSignOut} />}
+        ListFooterComponent={<SettingsFooter />}
         renderItem={({ item }) => (
           <ParcelCard
             parcel={item}

@@ -10,7 +10,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -229,13 +229,18 @@ export default function GroupScreen() {
 
   // Modals
   const [createVisible, setCreateVisible] = useState(false);
+  const [joinVisible,   setJoinVisible]   = useState(false);
   const [inviteGroupId, setInviteGroupId] = useState<string | null>(null);
-  const [createName, setCreateName] = useState('');
+  const [createName, setCreateName]     = useState('');
+  const [joinCode,   setJoinCode]       = useState('');
   const [inviteUsername, setInviteUsername] = useState('');
   const [busy, setBusy] = useState(false);
 
   // Player profile sheet
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
+
+  // Ref so realtime handler can read latest group IDs without stale closure
+  const groupIdsRef = useRef<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -324,6 +329,7 @@ export default function GroupScreen() {
       }));
 
       setGroups(built);
+      groupIdsRef.current = built.map((g) => g.id);
     } finally {
       setLoading(false);
     }
@@ -334,6 +340,71 @@ export default function GroupScreen() {
   const toggle = (id: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setExpandedId((prev) => (prev === id ? null : id));
+  };
+
+  // ── Realtime: refresh when any group_member row in my groups changes ──────
+  useEffect(() => {
+    const channel = supabase
+      .channel('group-members-live')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'group_members' },
+        (payload) => {
+          const row =
+            (payload.new as { group_id?: string } | null) ??
+            (payload.old as { group_id?: string });
+          if (row?.group_id && groupIdsRef.current.includes(row.group_id)) {
+            void load();
+          }
+        }
+      )
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [load]);
+
+  // ── Join by invite code ───────────────────────────────────────────────────
+  const handleJoinByCode = async () => {
+    const code = joinCode.trim().toUpperCase();
+    if (!code || !myUserId) return;
+    setBusy(true);
+    try {
+      // Check group limit first
+      const { count } = await supabase
+        .from('group_members')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', myUserId);
+      if ((count ?? 0) >= 3) {
+        throw new Error('You can be in up to 3 groups at a time. Leave a group first.');
+      }
+
+      const { data: group, error } = await supabase
+        .from('groups')
+        .select('id, name')
+        .eq('invite_code', code)
+        .single();
+      if (error || !group) throw new Error('No group found with that code');
+
+      const { data: existing } = await supabase
+        .from('group_members')
+        .select('user_id')
+        .eq('group_id', group.id)
+        .eq('user_id', myUserId)
+        .maybeSingle();
+      if (existing) throw new Error("You're already in this group");
+
+      await supabase
+        .from('group_members')
+        .insert({ group_id: group.id, user_id: myUserId, role: 'member' });
+
+      setJoinCode('');
+      setJoinVisible(false);
+      await load();
+      Alert.alert('Joined!', `Welcome to ${group.name}! 🎉`);
+    } catch (e: unknown) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not join group');
+    } finally {
+      setBusy(false);
+    }
   };
 
   // ── Create group ──────────────────────────────────────────────────────────
@@ -520,10 +591,16 @@ export default function GroupScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Groups</Text>
-        <Pressable style={styles.createBtn} onPress={() => setCreateVisible(true)}>
-          <FontAwesome name="plus" size={12} color="#0e0e10" style={{ marginRight: 6 }} />
-          <Text style={styles.createBtnText}>New Group</Text>
-        </Pressable>
+        <View style={styles.headerBtns}>
+          <Pressable style={[styles.createBtn, styles.joinBtn]} onPress={() => { setJoinCode(''); setJoinVisible(true); }}>
+            <FontAwesome name="sign-in" size={12} color={AMBER} style={{ marginRight: 6 }} />
+            <Text style={[styles.createBtnText, { color: AMBER }]}>Join</Text>
+          </Pressable>
+          <Pressable style={styles.createBtn} onPress={() => setCreateVisible(true)}>
+            <FontAwesome name="plus" size={12} color="#0e0e10" style={{ marginRight: 6 }} />
+            <Text style={styles.createBtnText}>New Group</Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* ── Pending group invites I've received ──────────────────────────── */}
@@ -617,6 +694,36 @@ export default function GroupScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* ── Join by code modal ────────────────────────────────────────────── */}
+      <Modal visible={joinVisible} transparent animationType="slide" onRequestClose={() => setJoinVisible(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+          <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+          <Pressable style={[styles.modalBackdrop, StyleSheet.absoluteFillObject]} onPress={() => setJoinVisible(false)} />
+          <View style={styles.modalSheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.modalTitle}>Join a Group</Text>
+            <Text style={styles.modalSubtitle}>Enter the 6-character invite code</Text>
+            <TextInput
+              style={[styles.input, { letterSpacing: 4, textAlign: 'center', textTransform: 'uppercase' }]}
+              placeholder="ABC123"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              value={joinCode}
+              onChangeText={(t) => setJoinCode(t.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              maxLength={6}
+              autoFocus
+              editable={!busy}
+              onSubmitEditing={() => void handleJoinByCode()}
+            />
+            <Pressable style={[styles.modalBtn, busy && { opacity: 0.5 }]} onPress={() => void handleJoinByCode()} disabled={busy}>
+              {busy ? <ActivityIndicator color="#0e0e10" /> : <Text style={styles.modalBtnText}>Join Group</Text>}
+            </Pressable>
+          </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       {/* ── Player profile sheet ──────────────────────────────────────────── */}
       <PlayerProfileSheet
         userId={profileUserId}
@@ -677,6 +784,11 @@ const styles = StyleSheet.create({
     color: '#fff',
     letterSpacing: 0.5,
   },
+  headerBtns: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   createBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -684,6 +796,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
+  },
+  joinBtn: {
+    backgroundColor: 'rgba(245,197,24,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,197,24,0.3)',
   },
   createBtnText: {
     fontFamily: 'Rajdhani_600SemiBold',
@@ -975,7 +1092,14 @@ const styles = StyleSheet.create({
     fontFamily: 'BarlowCondensed_900Black',
     fontSize: 22,
     color: '#fff',
+    marginBottom: 6,
+  },
+  modalSubtitle: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.38)',
     marginBottom: 16,
+    letterSpacing: 0.3,
   },
   input: {
     backgroundColor: 'rgba(255,255,255,0.06)',
