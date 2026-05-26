@@ -14,6 +14,7 @@ import '../global.css';
 
 import { AuthProvider } from '@/components/AuthProvider';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { GlobalInviteProvider } from '@/components/GlobalInviteProvider';
 import { useColorScheme } from '@/components/useColorScheme';
 
 export { ErrorBoundary } from 'expo-router';
@@ -90,6 +91,8 @@ function RootLayoutNav() {
               <Stack.Screen name="strava-auth" />
               <Stack.Screen name="auth/callback" />
             </Stack>
+            {/* Global modals: pair-request + group-invite notifications */}
+            <GlobalInviteProvider />
           </ThemeProvider>
         </AuthProvider>
       </ErrorBoundary>

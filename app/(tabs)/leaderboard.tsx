@@ -81,44 +81,47 @@ function PlayerRow({
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [
-        styles.row,
+        styles.rowOuter,
         isMe && styles.rowMe,
         pressed && styles.rowPressed,
       ]}>
-      {/* Rank */}
-      <View style={styles.rankCell}>
-        {rank <= 3
-          ? <Text style={styles.medal}>{MEDAL[rank]}</Text>
-          : <Text style={styles.rankNum}>{rank}</Text>}
-      </View>
+      {/* Inner View carries flexDirection:'row' — more reliable on Android */}
+      <View style={styles.row}>
+        {/* Rank */}
+        <View style={styles.rankCell}>
+          {rank <= 3
+            ? <Text style={styles.medal}>{MEDAL[rank]}</Text>
+            : <Text style={styles.rankNum}>{rank}</Text>}
+        </View>
 
-      {/* Avatar */}
-      <View style={[styles.avatar, isMe && styles.avatarMe]}>
-        <Text style={[styles.avatarTxt, isMe && styles.avatarTxtMe]}>
-          {initials(entry)}
-        </Text>
-      </View>
+        {/* Avatar */}
+        <View style={[styles.avatar, isMe && styles.avatarMe]}>
+          <Text style={[styles.avatarTxt, isMe && styles.avatarTxtMe]}>
+            {initials(entry)}
+          </Text>
+        </View>
 
-      {/* Name block */}
-      <View style={styles.nameBlock}>
-        <Text style={[styles.username, isMe && styles.usernameMe]} numberOfLines={1}>
-          @{entry.username ?? 'unknown'}
-        </Text>
-        {entry.display_name ? (
-          <Text style={styles.displayName} numberOfLines={1}>{entry.display_name}</Text>
-        ) : null}
-      </View>
+        {/* Name block */}
+        <View style={styles.nameBlock}>
+          <Text style={[styles.username, isMe && styles.usernameMe]} numberOfLines={1}>
+            @{entry.username ?? 'unknown'}
+          </Text>
+          {entry.display_name ? (
+            <Text style={styles.displayName} numberOfLines={1}>{entry.display_name}</Text>
+          ) : null}
+        </View>
 
-      {/* Primary stat */}
-      <View style={styles.statCol}>
-        <Text style={[styles.statValue, isMe && styles.statValueMe]}>{primaryValue}</Text>
-        <Text style={styles.statLabel}>{primaryLabel}</Text>
-      </View>
+        {/* Primary stat */}
+        <View style={styles.statCol}>
+          <Text style={[styles.statValue, isMe && styles.statValueMe]}>{primaryValue}</Text>
+          <Text style={styles.statLabel}>{primaryLabel}</Text>
+        </View>
 
-      {/* Secondary stat */}
-      <View style={[styles.statCol, styles.statColSecondary]}>
-        <Text style={styles.statValueDim}>{secondaryValue}</Text>
-        <Text style={styles.statLabel}>{secondaryLabel}</Text>
+        {/* Secondary stat */}
+        <View style={[styles.statCol, styles.statColSecondary]}>
+          <Text style={styles.statValueDim}>{secondaryValue}</Text>
+          <Text style={styles.statLabel}>{secondaryLabel}</Text>
+        </View>
       </View>
     </Pressable>
   );
@@ -128,27 +131,29 @@ function PlayerRow({
 
 function GroupRow({ entry, rank }: { entry: GroupEntry; rank: number }) {
   return (
-    <View style={styles.row}>
-      <View style={styles.rankCell}>
-        {rank <= 3
-          ? <Text style={styles.medal}>{MEDAL[rank]}</Text>
-          : <Text style={styles.rankNum}>{rank}</Text>}
-      </View>
+    <View style={styles.rowOuter}>
+      <View style={styles.row}>
+        <View style={styles.rankCell}>
+          {rank <= 3
+            ? <Text style={styles.medal}>{MEDAL[rank]}</Text>
+            : <Text style={styles.rankNum}>{rank}</Text>}
+        </View>
 
-      <View style={styles.groupIcon}>
-        <MaterialCommunityIcons name="account-group" size={15} color="#a78bfa" />
-      </View>
+        <View style={styles.groupIcon}>
+          <MaterialCommunityIcons name="account-group" size={15} color="#a78bfa" />
+        </View>
 
-      <View style={styles.nameBlock}>
-        <Text style={styles.groupName} numberOfLines={1}>{entry.name}</Text>
-        <Text style={styles.groupMeta}>
-          {entry.member_count} member{entry.member_count !== 1 ? 's' : ''}
-        </Text>
-      </View>
+        <View style={styles.nameBlock}>
+          <Text style={styles.groupName} numberOfLines={1}>{entry.name}</Text>
+          <Text style={styles.groupMeta}>
+            {entry.member_count} member{entry.member_count !== 1 ? 's' : ''}
+          </Text>
+        </View>
 
-      <View style={styles.statCol}>
-        <Text style={[styles.statValue, { color: '#a78bfa' }]}>{entry.points.toLocaleString()}</Text>
-        <Text style={styles.statLabel}>pool pts</Text>
+        <View style={styles.statCol}>
+          <Text style={[styles.statValue, { color: '#a78bfa' }]}>{entry.points.toLocaleString()}</Text>
+          <Text style={styles.statLabel}>pool pts</Text>
+        </View>
       </View>
     </View>
   );
@@ -457,13 +462,17 @@ const styles = StyleSheet.create({
   list: { paddingBottom: 100 },
 
   // ── Row ────────────────────────────────────────────────────────────────────
+  // rowOuter: applied to Pressable/View — handles border + background state
+  rowOuter: {
+    borderBottomWidth: 1,
+    borderColor: 'rgba(255,255,255,0.04)',
+  },
+  // row: applied to an inner View — guarantees flexDirection:'row' on Android
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderColor: 'rgba(255,255,255,0.04)',
   },
   rowMe: {
     backgroundColor: 'rgba(245,197,24,0.06)',

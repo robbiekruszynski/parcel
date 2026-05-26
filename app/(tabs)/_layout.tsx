@@ -2,6 +2,7 @@ import { Tabs } from 'expo-router';
 import { View } from 'react-native';
 
 import { NavSheet } from '@/components/NavSheet';
+import { StravaUploadToast } from '@/components/StravaUploadToast';
 import { useLocationStore } from '@/stores/locationStore';
 
 export default function TabLayout() {
@@ -25,6 +26,8 @@ export default function TabLayout() {
       </Tabs>
 
       {!capturingParcel && <NavSheet />}
+      {/* Strava upload toast — visible on all tab screens */}
+      <StravaUploadToast />
     </View>
   );
 }

@@ -25,7 +25,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ParcelMap } from '@/components/ParcelMap';
 import { ParcelRecordingOverlay } from '@/components/ParcelRecordingOverlay';
-import { StravaUploadToast } from '@/components/StravaUploadToast';
 import { usePairing } from '@/hooks/usePairing';
 import { useParcelTracking, type ActivityType } from '@/hooks/useParcelTracking';
 import { usePairStore } from '@/stores/pairStore';
@@ -73,7 +72,6 @@ export default function MapScreen() {
 
   const partners        = usePairStore((s) => s.partners);
   const pendingInvites  = usePairStore((s) => s.pendingInvites);
-  const incomingRequest = usePairStore((s) => s.incomingRequest);
 
   const activityLocked = isTracking || isPaused;
 
@@ -133,23 +131,6 @@ export default function MapScreen() {
         onClaim={claimParcel}
       />
 
-      {/* ── Incoming pair request modal ────────────────────────────────────── */}
-      <Modal
-        visible={incomingRequest !== null}
-        transparent
-        animationType="slide"
-        onRequestClose={() =>
-          incomingRequest && void declineRequest(incomingRequest.id)
-        }>
-        {incomingRequest && (
-          <IncomingRequestSheet
-            fromUsername={incomingRequest.fromUsername}
-            onAccept={() => void acceptRequest(incomingRequest.id)}
-            onDecline={() => void declineRequest(incomingRequest.id)}
-          />
-        )}
-      </Modal>
-
       {/* ── Find-partner modal ─────────────────────────────────────────────── */}
       <Modal
         visible={showFindPartner}
@@ -164,9 +145,6 @@ export default function MapScreen() {
           onClose={() => setShowFindPartner(false)}
         />
       </Modal>
-
-      {/* ── Strava upload toast ───────────────────────────────────────────────── */}
-      <StravaUploadToast />
 
       {/* ── Help / FAQ button — stacked below the locate-me button ──────────── */}
       <Pressable
@@ -183,45 +161,6 @@ export default function MapScreen() {
         onRequestClose={() => setShowHelp(false)}>
         <HelpModal onClose={() => setShowHelp(false)} />
       </Modal>
-    </View>
-  );
-}
-
-// ─── Incoming request sheet ───────────────────────────────────────────────────
-
-function IncomingRequestSheet({
-  fromUsername,
-  onAccept,
-  onDecline,
-}: {
-  fromUsername: string | null;
-  onAccept: () => void;
-  onDecline: () => void;
-}) {
-  return (
-    <View style={sheetStyles.backdrop}>
-      <View style={sheetStyles.sheet}>
-        <View style={sheetStyles.handle} />
-        <MaterialCommunityIcons
-          name="account-multiple-plus"
-          size={36}
-          color="#63dc96"
-          style={{ alignSelf: 'center', marginBottom: 12 }}
-        />
-        <Text style={sheetStyles.title}>Pair Request</Text>
-        <Text style={sheetStyles.body}>
-          <Text style={sheetStyles.highlight}>@{fromUsername ?? 'someone'}</Text>
-          {' '}wants to walk with you — points on the next claimed parcel will be split equally among your party.
-        </Text>
-        <View style={sheetStyles.row}>
-          <Pressable style={[sheetStyles.btn, sheetStyles.btnDecline]} onPress={onDecline}>
-            <Text style={sheetStyles.btnDeclineText}>Decline</Text>
-          </Pressable>
-          <Pressable style={[sheetStyles.btn, sheetStyles.btnAccept]} onPress={onAccept}>
-            <Text style={sheetStyles.btnAcceptText}>Accept</Text>
-          </Pressable>
-        </View>
-      </View>
     </View>
   );
 }

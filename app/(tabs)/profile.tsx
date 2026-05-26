@@ -6,18 +6,26 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  LayoutAnimation,
+  Platform,
   Pressable,
   RefreshControl,
   SafeAreaView,
   StyleSheet,
   Text,
+  UIManager,
   View,
 } from 'react-native';
 
 import { useAuth } from '@/components/AuthProvider';
 import { StravaConnectButton } from '@/components/StravaConnectButton';
-import { formatAreaM2 } from '@/lib/parcelGeometry';
+import { formatAreaM2, formatDistanceM } from '@/lib/parcelGeometry';
 import { supabase } from '@/lib/supabase';
+
+// Enable LayoutAnimation on Android
+if (Platform.OS === 'android') {
+  UIManager.setLayoutAnimationEnabledExperimental?.(true);
+}
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -35,6 +43,7 @@ interface UserParcel {
   color: string;
   points: number;
   activity: string;
+  coordinates: [number, number][] | null;
 }
 
 type ActivityIconName =
@@ -68,10 +77,33 @@ function activityLabel(activity: string): string {
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
+    month: 'short', day: 'numeric', year: 'numeric',
   });
+}
+
+function formatTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, {
+    hour: 'numeric', minute: '2-digit', hour12: true,
+  });
+}
+
+/** Haversine distance (metres) between two [lat, lng] points. */
+function haversine(a: [number, number], b: [number, number]): number {
+  const R = 6_371_000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b[0] - a[0]);
+  const dLng = toRad(b[1] - a[1]);
+  const sinL = Math.sin(dLat / 2);
+  const sinG = Math.sin(dLng / 2);
+  const c = sinL * sinL + Math.cos(toRad(a[0])) * Math.cos(toRad(b[0])) * sinG * sinG;
+  return R * 2 * Math.atan2(Math.sqrt(c), Math.sqrt(1 - c));
+}
+
+function routeDistance(coords: [number, number][]): number {
+  if (coords.length < 2) return 0;
+  let d = 0;
+  for (let i = 1; i < coords.length; i++) d += haversine(coords[i - 1], coords[i]);
+  return d;
 }
 
 function initials(profile: Profile | null): string {
@@ -83,29 +115,93 @@ function initials(profile: Profile | null): string {
   return '?';
 }
 
+// ─── Detail row (used in expanded section) ────────────────────────────────────
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={styles.detailValue}>{value}</Text>
+    </View>
+  );
+}
+
 // ─── Parcel Card ───────────────────────────────────────────────────────────────
 
-function ParcelCard({ parcel }: { parcel: UserParcel }) {
-  const icon = activityIcon(parcel.activity);
+function ParcelCard({
+  parcel,
+  expanded,
+  onToggle,
+}: {
+  parcel: UserParcel;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const icon     = activityIcon(parcel.activity);
+  const distance = parcel.coordinates ? routeDistance(parcel.coordinates) : 0;
 
   return (
-    <View style={styles.card}>
+    <Pressable onPress={onToggle} style={styles.card}>
       <View style={[styles.swatch, { backgroundColor: parcel.color }]} />
       <View style={styles.cardBody}>
-        <Text style={styles.areaText}>{formatAreaM2(parcel.area_sqm)}</Text>
+        {/* Top row: area | activity | pts | chevron */}
         <View style={styles.cardRow}>
+          <Text style={styles.areaText}>{formatAreaM2(parcel.area_sqm)}</Text>
           <MaterialCommunityIcons
             name={icon}
             size={14}
             color="#9ca3af"
-            style={{ marginRight: 4 }}
+            style={{ marginRight: 3 }}
           />
           <Text style={styles.activityText}>{activityLabel(parcel.activity)}</Text>
           <Text style={styles.pointsText}>{parcel.points} pts</Text>
+          <MaterialCommunityIcons
+            name={expanded ? 'chevron-up' : 'chevron-down'}
+            size={16}
+            color="rgba(255,255,255,0.3)"
+          />
         </View>
+
         <Text style={styles.dateText}>{formatDate(parcel.claimed_at)}</Text>
+
+        {/* Expanded detail section */}
+        {expanded && (
+          <View style={styles.expandedSection}>
+            <View style={styles.expandedDivider} />
+            <DetailRow
+              label="CLAIMED"
+              value={`${formatDate(parcel.claimed_at)} · ${formatTime(parcel.claimed_at)}`}
+            />
+            <DetailRow
+              label="AREA"
+              value={formatAreaM2(parcel.area_sqm)}
+            />
+            {distance > 0 && (
+              <DetailRow label="DISTANCE" value={formatDistanceM(distance)} />
+            )}
+            <DetailRow
+              label="ACTIVITY"
+              value={activityLabel(parcel.activity)}
+            />
+            <DetailRow
+              label="POINTS"
+              value={`${parcel.points} pts (ticking every 5 min)`}
+            />
+            <Pressable
+              style={styles.viewRouteBtn}
+              onPress={() => router.push(`/parcel/${parcel.id}`)}>
+              <MaterialCommunityIcons
+                name="map-outline"
+                size={14}
+                color={AMBER}
+                style={{ marginRight: 6 }}
+              />
+              <Text style={styles.viewRouteBtnText}>VIEW ROUTE ON MAP</Text>
+            </Pressable>
+          </View>
+        )}
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -159,6 +255,7 @@ export default function ProfileScreen() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [parcels, setParcels] = useState<UserParcel[]>([]);
   const [loading, setLoading] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -180,7 +277,7 @@ export default function ProfileScreen() {
           .single(),
         supabase
           .from('parcels')
-          .select('id, area_sqm, claimed_at, color, points, activity')
+          .select('id, area_sqm, claimed_at, color, points, activity, coordinates')
           .eq('owner_id', uid)
           .order('claimed_at', { ascending: false }),
       ]);
@@ -204,6 +301,11 @@ export default function ProfileScreen() {
   useFocusEffect(
     useCallback(() => { void load(); }, [load])
   );
+
+  const toggleParcel = (id: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpandedId((prev) => (prev === id ? null : id));
+  };
 
   const handleSignOut = () => {
     Alert.alert('Sign out', 'Sign out of parcel on this device?', [
@@ -286,7 +388,13 @@ export default function ProfileScreen() {
           )
         }
         ListFooterComponent={<SettingsFooter onSignOut={handleSignOut} />}
-        renderItem={({ item }) => <ParcelCard parcel={item} />}
+        renderItem={({ item }) => (
+          <ParcelCard
+            parcel={item}
+            expanded={expandedId === item.id}
+            onToggle={() => toggleParcel(item.id)}
+          />
+        )}
       />
     </SafeAreaView>
   );
@@ -409,18 +517,19 @@ const styles = StyleSheet.create({
   cardRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
   },
   areaText: {
     fontFamily: 'BarlowCondensed_900Black',
     fontSize: 18,
     color: '#f3f4f6',
     lineHeight: 22,
+    flex: 1,
   },
   activityText: {
     fontFamily: 'Rajdhani_600SemiBold',
     fontSize: 12,
     color: '#9ca3af',
-    flex: 1,
   },
   pointsText: {
     fontFamily: 'BarlowCondensed_900Black',
@@ -431,6 +540,51 @@ const styles = StyleSheet.create({
     fontFamily: 'Rajdhani_600SemiBold',
     fontSize: 11,
     color: '#6b7280',
+  },
+
+  // Expanded section
+  expandedSection: { marginTop: 10 },
+  expandedDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    marginBottom: 10,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  detailLabel: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 10,
+    letterSpacing: 1.5,
+    color: 'rgba(255,255,255,0.35)',
+    textTransform: 'uppercase',
+  },
+  detailValue: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.75)',
+    textAlign: 'right',
+    flex: 1,
+    marginLeft: 16,
+  },
+  viewRouteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(245,197,24,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,197,24,0.25)',
+  },
+  viewRouteBtnText: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 11,
+    letterSpacing: 1.5,
+    color: AMBER,
   },
 
   // Settings section
