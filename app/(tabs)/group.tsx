@@ -142,7 +142,6 @@ function GroupCard({
   myUserId,
   expanded,
   onToggle,
-  onInvite,
   onLeave,
   onMemberPress,
   onContributionChange,
@@ -153,7 +152,6 @@ function GroupCard({
   myUserId: string | null;
   expanded: boolean;
   onToggle: () => void;
-  onInvite: (groupId: string) => void;
   onLeave: (groupId: string, groupName: string) => void;
   onMemberPress: (userId: string) => void;
   onContributionChange: (groupId: string, userId: string, delta: number) => void;
@@ -228,31 +226,17 @@ function GroupCard({
 
           {/* Actions */}
           <View style={styles.groupActions}>
-            <Pressable style={styles.actionBtn} onPress={() => onInvite(group.id)}>
-              <FontAwesome name="user-plus" size={13} color="#f5c518" style={{ marginRight: 6 }} />
-              <Text style={styles.actionBtnText}>Invite</Text>
-            </Pressable>
             <Pressable
               style={[styles.actionBtn, styles.actionBtnDanger]}
               onPress={() => onLeave(group.id, group.name)}>
               <FontAwesome name="sign-out" size={13} color="#ef4444" style={{ marginRight: 6 }} />
-              <Text style={[styles.actionBtnText, { color: '#ef4444' }]}>Leave</Text>
+              <Text style={[styles.actionBtnText, { color: '#ef4444' }]}>Leave Group</Text>
             </Pressable>
           </View>
         </View>
       )}
     </View>
   );
-}
-
-// ─── Types (pending invites) ──────────────────────────────────────────────────
-
-interface PendingGroupInvite {
-  id: string;
-  group_id: string;
-  group_name: string;
-  from_username: string | null;
-  invite_code: string | null;
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -263,17 +247,11 @@ export default function GroupScreen() {
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // Pending invites I've received but haven't actioned yet
-  const [pendingInvites, setPendingInvites] = useState<PendingGroupInvite[]>([]);
-
   // Modals
   const [createVisible, setCreateVisible] = useState(false);
   const [joinVisible,   setJoinVisible]   = useState(false);
-  const [inviteGroupId, setInviteGroupId] = useState<string | null>(null);
-  const [createName, setCreateName]     = useState('');
-  const [joinCode,   setJoinCode]       = useState('');
-  const [inviteCodeInputs, setInviteCodeInputs] = useState<Record<string, string>>({});
-  const [inviteUsername, setInviteUsername] = useState('');
+  const [createName, setCreateName] = useState('');
+  const [joinCode,   setJoinCode]   = useState('');
   const [busy, setBusy] = useState(false);
 
   // Player profile sheet
@@ -289,30 +267,6 @@ export default function GroupScreen() {
       const uid = sessionData.session?.user?.id ?? null;
       setMyUserId(uid);
       if (!uid) return;
-
-      // Load pending invites I've received
-      const { data: inviteRows } = await supabase
-        .from('group_invites')
-        .select('id, group_id, group_name, from_user_id, profiles!group_invites_from_user_id_fkey(username), groups(invite_code)')
-        .eq('to_user_id', uid)
-        .eq('status', 'pending')
-        .gt('expires_at', new Date().toISOString());
-
-      if (inviteRows) {
-        setPendingInvites(
-          inviteRows.map((r) => {
-            const profile = Array.isArray(r.profiles) ? r.profiles[0] : r.profiles;
-            const group = Array.isArray(r.groups) ? r.groups[0] : r.groups;
-            return {
-              id:            r.id,
-              group_id:      r.group_id,
-              group_name:    r.group_name,
-              from_username: (profile as { username?: string | null } | null)?.username ?? null,
-              invite_code:   (group as { invite_code?: string | null } | null)?.invite_code ?? null,
-            };
-          })
-        );
-      }
 
       // Groups I'm in
       const { data: memberRows } = await supabase
@@ -510,110 +464,6 @@ export default function GroupScreen() {
     }
   };
 
-  // ── Invite by username (sends a group_invites row — no silent add) ────────
-  const handleInvite = async () => {
-    const uname = inviteUsername.trim().replace(/^@/, '').toLowerCase();
-    if (!uname || !inviteGroupId || !myUserId) return;
-    setBusy(true);
-    try {
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('username', uname)
-        .single();
-
-      if (error || !profile) throw new Error(`@${uname} not found`);
-
-      // Already a member?
-      const { data: existing } = await supabase
-        .from('group_members')
-        .select('user_id')
-        .eq('group_id', inviteGroupId)
-        .eq('user_id', profile.id)
-        .maybeSingle();
-      if (existing) throw new Error(`@${uname} is already in this group`);
-
-      // Already invited (pending)?
-      const { data: alreadyPending } = await supabase
-        .from('group_invites')
-        .select('id')
-        .eq('group_id', inviteGroupId)
-        .eq('to_user_id', profile.id)
-        .eq('status', 'pending')
-        .maybeSingle();
-      if (alreadyPending) throw new Error(`Invite already sent to @${uname}`);
-
-      const group = groups.find((g) => g.id === inviteGroupId);
-
-      const { error: invErr } = await supabase
-        .from('group_invites')
-        .insert({
-          group_id:     inviteGroupId,
-          from_user_id: myUserId,
-          to_user_id:   profile.id,
-          group_name:   group?.name ?? '',
-        });
-
-      if (invErr) throw new Error(invErr.message);
-
-      setInviteUsername('');
-      setInviteGroupId(null);
-      Alert.alert(
-        'Invite sent!',
-        `@${uname} will get a notification to join. Share your group's 6-character invite code so they can enter it when accepting.`,
-      );
-    } catch (e: unknown) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Could not send invite');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // ── Accept / decline a pending group invite ────────────────────────────────
-  const handleAcceptInvite = async (invite: PendingGroupInvite) => {
-    if (!myUserId) return;
-    const entered = (inviteCodeInputs[invite.id] ?? '').trim().toUpperCase();
-    if (entered.length !== 6) {
-      Alert.alert('Enter invite code', 'Type the 6-character code shared with you.');
-      return;
-    }
-    if (invite.invite_code && entered !== invite.invite_code.toUpperCase()) {
-      Alert.alert('Wrong code', 'That invite code does not match this group.');
-      return;
-    }
-    try {
-      const { count } = await supabase
-        .from('group_members')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', myUserId);
-      if ((count ?? 0) >= 3) {
-        throw new Error('You can be in up to 3 groups at a time. Leave a group first.');
-      }
-
-      const [upd, ins] = await Promise.all([
-        supabase.from('group_invites').update({ status: 'accepted' }).eq('id', invite.id),
-        supabase.from('group_members').insert({ group_id: invite.group_id, user_id: myUserId, role: 'member' }),
-      ]);
-      if (upd.error) throw new Error(upd.error.message);
-      if (ins.error && !ins.error.message.includes('duplicate')) throw new Error(ins.error.message);
-      setPendingInvites((prev) => prev.filter((i) => i.id !== invite.id));
-      setInviteCodeInputs((prev) => {
-        const next = { ...prev };
-        delete next[invite.id];
-        return next;
-      });
-      await load();
-      Alert.alert('Joined!', `You're now in ${invite.group_name}.`);
-    } catch (e: unknown) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Could not accept invite');
-    }
-  };
-
-  const handleDeclineInvite = async (invite: PendingGroupInvite) => {
-    await supabase.from('group_invites').update({ status: 'declined' }).eq('id', invite.id);
-    setPendingInvites((prev) => prev.filter((i) => i.id !== invite.id));
-  };
-
   // ── Contribution % change ─────────────────────────────────────────────────
   const handleContributionChange = async (groupId: string, userId: string, delta: number) => {
     // Optimistic update
@@ -710,54 +560,6 @@ export default function GroupScreen() {
         </View>
       </View>
 
-      {/* ── Pending group invites I've received ──────────────────────────── */}
-      {pendingInvites.length > 0 && (
-        <View style={styles.pendingSection}>
-          <Text style={styles.pendingSectionTitle}>PENDING INVITES</Text>
-          {pendingInvites.map((inv) => (
-            <View key={inv.id} style={styles.pendingCard}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.pendingGroupName}>{inv.group_name}</Text>
-                <Text style={styles.pendingFrom}>
-                  from @{inv.from_username ?? 'unknown'}
-                </Text>
-                <TextInput
-                  style={styles.pendingCodeInput}
-                  placeholder="Enter 6-char code"
-                  placeholderTextColor="rgba(255,255,255,0.25)"
-                  value={inviteCodeInputs[inv.id] ?? ''}
-                  onChangeText={(t) =>
-                    setInviteCodeInputs((prev) => ({
-                      ...prev,
-                      [inv.id]: t.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6),
-                    }))
-                  }
-                  autoCapitalize="characters"
-                  autoCorrect={false}
-                  maxLength={6}
-                />
-              </View>
-              <View style={styles.pendingActions}>
-                <Pressable
-                  style={styles.pendingDeclineBtn}
-                  onPress={() => void handleDeclineInvite(inv)}>
-                  <Text style={styles.pendingDeclineTxt}>Decline</Text>
-                </Pressable>
-                <Pressable
-                  style={[
-                    styles.pendingAcceptBtn,
-                    (inviteCodeInputs[inv.id]?.length ?? 0) !== 6 && { opacity: 0.45 },
-                  ]}
-                  onPress={() => void handleAcceptInvite(inv)}
-                  disabled={(inviteCodeInputs[inv.id]?.length ?? 0) !== 6}>
-                  <Text style={styles.pendingAcceptTxt}>Join</Text>
-                </Pressable>
-              </View>
-            </View>
-          ))}
-        </View>
-      )}
-
       <FlatList
         data={groups}
         keyExtractor={(g) => g.id}
@@ -773,7 +575,7 @@ export default function GroupScreen() {
               <MaterialCommunityIcons name="account-group-outline" size={56} color="rgba(255,255,255,0.1)" />
               <Text style={styles.emptyTitle}>No groups yet</Text>
               <Text style={styles.emptySubtitle}>
-                Create a group and invite friends by their @username
+                Create a group and share the invite code with friends
               </Text>
               <Pressable style={styles.emptyCreateBtn} onPress={() => setCreateVisible(true)}>
                 <Text style={styles.emptyCreateBtnText}>Create your first group</Text>
@@ -787,7 +589,6 @@ export default function GroupScreen() {
             myUserId={myUserId}
             expanded={expandedId === item.id}
             onToggle={() => toggle(item.id)}
-            onInvite={(id) => { setInviteGroupId(id); setInviteUsername(''); }}
             onLeave={handleLeave}
             onMemberPress={(uid) => setProfileUserId(uid)}
             onContributionChange={handleContributionChange}
@@ -865,32 +666,6 @@ export default function GroupScreen() {
         onClose={() => setProfileUserId(null)}
       />
 
-      {/* ── Invite modal ───────────────────────────────────────────────────── */}
-      <Modal visible={!!inviteGroupId} transparent animationType="slide" onRequestClose={() => setInviteGroupId(null)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-          <View style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <Pressable style={[styles.modalBackdrop, StyleSheet.absoluteFillObject]} onPress={() => setInviteGroupId(null)} />
-          <View style={styles.modalSheet}>
-            <View style={styles.sheetHandle} />
-            <Text style={styles.modalTitle}>Invite by Username</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="@username"
-              placeholderTextColor="rgba(255,255,255,0.3)"
-              value={inviteUsername}
-              onChangeText={setInviteUsername}
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoFocus
-              editable={!busy}
-            />
-            <Pressable style={[styles.modalBtn, busy && { opacity: 0.5 }]} onPress={() => void handleInvite()} disabled={busy}>
-              {busy ? <ActivityIndicator color="#0e0e10" /> : <Text style={styles.modalBtnText}>Add to Group</Text>}
-            </Pressable>
-          </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -1188,89 +963,6 @@ const styles = StyleSheet.create({
     fontFamily: 'Rajdhani_600SemiBold',
     fontSize: 13,
     color: '#0e0e10',
-  },
-
-  // Pending invites section
-  pendingSection: {
-    paddingHorizontal: 16,
-    paddingBottom: 4,
-  },
-  pendingSectionTitle: {
-    fontFamily: 'Rajdhani_600SemiBold',
-    fontSize: 10,
-    letterSpacing: 2,
-    color: 'rgba(255,255,255,0.3)',
-    marginBottom: 8,
-    marginTop: 4,
-  },
-  pendingCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(167,139,250,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(167,139,250,0.25)',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 8,
-    gap: 10,
-  },
-  pendingGroupName: {
-    fontFamily: 'BarlowCondensed_900Black',
-    fontSize: 17,
-    color: '#fff',
-    letterSpacing: 0.3,
-  },
-  pendingFrom: {
-    fontFamily: 'Rajdhani_600SemiBold',
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.4)',
-    marginTop: 2,
-    marginBottom: 8,
-  },
-  pendingCodeInput: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(167,139,250,0.3)',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    color: '#fff',
-    fontFamily: 'Rajdhani_700Bold',
-    fontSize: 16,
-    letterSpacing: 4,
-    textAlign: 'center',
-    textTransform: 'uppercase',
-    marginRight: 8,
-  },
-  pendingActions: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  pendingDeclineBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  pendingDeclineTxt: {
-    fontFamily: 'Rajdhani_600SemiBold',
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.45)',
-  },
-  pendingAcceptBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 8,
-    backgroundColor: '#a78bfa',
-  },
-  pendingAcceptTxt: {
-    fontFamily: 'Rajdhani_600SemiBold',
-    fontSize: 12,
-    color: '#0e0e10',
-    fontWeight: '700',
   },
 
   // Modals
