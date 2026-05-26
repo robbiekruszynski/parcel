@@ -11,15 +11,16 @@
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import * as Clipboard from 'expo-clipboard';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Modal,
   Pressable,
+  Share,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 
@@ -43,9 +44,7 @@ export function GlobalInviteProvider() {
 
   const incomingPair  = usePairStore((s) => s.incomingRequest);
   const [groupInvite, setGroupInvite] = useState<IncomingGroupInvite | null>(null);
-  const [groupCodeInput, setGroupCodeInput] = useState('');
-  const [pairBusy,  setPairBusy]  = useState(false);
-  const [groupBusy, setGroupBusy] = useState(false);
+  const [pairBusy, setPairBusy] = useState(false);
 
   const hydrateGroupInvite = async (row: {
     id: string;
@@ -58,7 +57,6 @@ export function GlobalInviteProvider() {
       supabase.from('groups').select('invite_code').eq('id', row.group_id).single(),
     ]);
 
-    setGroupCodeInput('');
     setGroupInvite({
       id:           row.id,
       groupId:      row.group_id,
@@ -200,62 +198,9 @@ export function GlobalInviteProvider() {
     usePairStore.getState().setIncomingRequest(null);
   };
 
-  // ── Group invite — accept / decline ──────────────────────────────────────
-
-  const acceptGroupInvite = async () => {
-    if (!groupInvite || !myUserIdRef.current) return;
-
-    const entered = groupCodeInput.trim().toUpperCase();
-    if (entered.length !== 6) {
-      Alert.alert('Enter invite code', 'Type the 6-character code shared with you.');
-      return;
-    }
-    if (groupInvite.inviteCode && entered !== groupInvite.inviteCode.toUpperCase()) {
-      Alert.alert('Wrong code', 'That invite code does not match this group.');
-      return;
-    }
-
-    setGroupBusy(true);
-    try {
-      const { count } = await supabase
-        .from('group_members')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', myUserIdRef.current);
-      if ((count ?? 0) >= 3) {
-        throw new Error('You can be in up to 3 groups at a time. Leave a group first.');
-      }
-
-      const [updateRes, insertRes] = await Promise.all([
-        supabase
-          .from('group_invites')
-          .update({ status: 'accepted' })
-          .eq('id', groupInvite.id),
-        supabase
-          .from('group_members')
-          .insert({ group_id: groupInvite.groupId, user_id: myUserIdRef.current, role: 'member' }),
-      ]);
-      if (updateRes.error) throw new Error(updateRes.error.message);
-      if (insertRes.error && !insertRes.error.message.includes('duplicate')) {
-        throw new Error(insertRes.error.message);
-      }
-      setGroupInvite(null);
-      setGroupCodeInput('');
-      Alert.alert('Joined!', `You're now a member of ${groupInvite.groupName}.`);
-    } catch (e: unknown) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Could not accept invite');
-    } finally {
-      setGroupBusy(false);
-    }
-  };
-
-  const declineGroupInvite = async () => {
-    if (!groupInvite) return;
-    await supabase
-      .from('group_invites')
-      .update({ status: 'declined' })
-      .eq('id', groupInvite.id);
+  // ── Group invite — dismiss (user joins via Groups → Join tab) ────────────
+  const dismissGroupInvite = () => {
     setGroupInvite(null);
-    setGroupCodeInput('');
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -292,16 +237,13 @@ export function GlobalInviteProvider() {
         visible={groupInvite !== null}
         transparent
         animationType="slide"
-        onRequestClose={() => void declineGroupInvite()}>
+        onRequestClose={dismissGroupInvite}>
         {groupInvite ? (
           <GroupInviteSheet
             groupName={groupInvite.groupName}
             fromUsername={groupInvite.fromUsername}
-            code={groupCodeInput}
-            onCodeChange={(t) => setGroupCodeInput(t.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))}
-            busy={groupBusy}
-            onJoin={() => void acceptGroupInvite()}
-            onDecline={() => void declineGroupInvite()}
+            inviteCode={groupInvite.inviteCode}
+            onDismiss={dismissGroupInvite}
           />
         ) : null}
       </Modal>
@@ -309,25 +251,35 @@ export function GlobalInviteProvider() {
   );
 }
 
-// ─── Group invite sheet (code entry + JOIN / DECLINE) ────────────────────────
+// ─── Group invite sheet — shows code prominently, user copies it then joins ───
 
 function GroupInviteSheet({
   groupName,
   fromUsername,
-  code,
-  onCodeChange,
-  busy,
-  onJoin,
-  onDecline,
+  inviteCode,
+  onDismiss,
 }: {
   groupName: string;
   fromUsername: string | null;
-  code: string;
-  onCodeChange: (value: string) => void;
-  busy: boolean;
-  onJoin: () => void;
-  onDecline: () => void;
+  inviteCode: string | null;
+  onDismiss: () => void;
 }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    if (!inviteCode) return;
+    await Clipboard.setStringAsync(inviteCode);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
+  };
+
+  const handleShare = () => {
+    if (!inviteCode) return;
+    void Share.share({
+      message: `Join "${groupName}" on Parcel! Invite code: ${inviteCode}`,
+    });
+  };
+
   return (
     <View style={s.backdrop}>
       <View style={s.sheet}>
@@ -345,39 +297,44 @@ function GroupInviteSheet({
           <Text style={[s.highlight, { color: '#a78bfa' }]}>
             @{fromUsername ?? 'someone'}
           </Text>
-          {` invited you to join "${groupName}". Enter the 6-character invite code to join.`}
+          {` invited you to join `}
+          <Text style={[s.highlight, { color: '#fff' }]}>{groupName}</Text>
         </Text>
 
-        <TextInput
-          style={s.codeInput}
-          placeholder="ABC123"
-          placeholderTextColor="rgba(255,255,255,0.25)"
-          value={code}
-          onChangeText={onCodeChange}
-          autoCapitalize="characters"
-          autoCorrect={false}
-          maxLength={6}
-          editable={!busy}
-          onSubmitEditing={onJoin}
-        />
+        {/* Code display */}
+        {inviteCode ? (
+          <View style={s.codeBox}>
+            <Text style={s.codeLabel}>YOUR INVITE CODE</Text>
+            <Text style={s.codeValue}>{inviteCode}</Text>
+            <View style={s.codeActions}>
+              <Pressable
+                style={[s.copyBtn, copied && s.copyBtnSuccess]}
+                onPress={() => void handleCopy()}>
+                <MaterialCommunityIcons
+                  name={copied ? 'check' : 'content-copy'}
+                  size={14}
+                  color={copied ? '#0e0e10' : '#a78bfa'}
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={[s.copyBtnTxt, copied && { color: '#0e0e10' }]}>
+                  {copied ? 'Copied!' : 'Copy Code'}
+                </Text>
+              </Pressable>
+              <Pressable style={s.shareBtn} onPress={handleShare}>
+                <MaterialCommunityIcons name="share-variant" size={14} color="rgba(255,255,255,0.5)" style={{ marginRight: 6 }} />
+                <Text style={s.shareBtnTxt}>Share</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
 
-        <View style={s.btnRow}>
-          <Pressable
-            style={[s.btn, s.btnDecline]}
-            onPress={onDecline}
-            disabled={busy}>
-            <Text style={s.btnDeclineTxt}>Decline</Text>
-          </Pressable>
+        <Text style={s.joinHint}>
+          Go to <Text style={{ color: '#fff', fontWeight: '700' }}>Groups → Join</Text> and enter this code
+        </Text>
 
-          <Pressable
-            style={[s.btn, { backgroundColor: '#a78bfa' }, busy && { opacity: 0.6 }]}
-            onPress={onJoin}
-            disabled={busy || code.length !== 6}>
-            {busy
-              ? <ActivityIndicator color="#0e0e10" size="small" />
-              : <Text style={s.btnAcceptTxt}>Join</Text>}
-          </Pressable>
-        </View>
+        <Pressable style={[s.btn, s.btnDismiss]} onPress={onDismiss}>
+          <Text style={s.btnDismissTxt}>Got it</Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -504,20 +461,77 @@ const s = StyleSheet.create({
     fontFamily: 'Rajdhani_600SemiBold',
     fontWeight: '700',
   },
-  codeInput: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
+  // Code display box
+  codeBox: {
+    backgroundColor: 'rgba(167,139,250,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(167,139,250,0.25)',
+    borderRadius: 16,
+    paddingVertical: 20,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  codeLabel: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 10,
+    letterSpacing: 2,
+    color: 'rgba(167,139,250,0.6)',
+    marginBottom: 8,
+  },
+  codeValue: {
+    fontFamily: 'Rajdhani_700Bold',
+    fontSize: 38,
+    letterSpacing: 10,
+    color: '#fff',
+    marginBottom: 16,
+  },
+  codeActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  copyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 20,
+    backgroundColor: 'rgba(167,139,250,0.12)',
     borderWidth: 1,
     borderColor: 'rgba(167,139,250,0.35)',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    color: '#fff',
-    fontFamily: 'Rajdhani_700Bold',
-    fontSize: 22,
-    letterSpacing: 6,
+  },
+  copyBtnSuccess: {
+    backgroundColor: '#a78bfa',
+    borderColor: '#a78bfa',
+  },
+  copyBtnTxt: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 13,
+    color: '#a78bfa',
+    fontWeight: '700',
+  },
+  shareBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  shareBtnTxt: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.5)',
+  },
+  joinHint: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.35)',
     textAlign: 'center',
-    textTransform: 'uppercase',
-    marginBottom: 24,
+    marginBottom: 20,
+    lineHeight: 19,
   },
   btnRow: {
     flexDirection: 'row',
@@ -535,10 +549,20 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
   },
+  btnDismiss: {
+    backgroundColor: '#a78bfa',
+  },
   btnDeclineTxt: {
     fontFamily: 'Rajdhani_600SemiBold',
     fontSize: 15,
     color: 'rgba(255,255,255,0.5)',
+    letterSpacing: 0.5,
+  },
+  btnDismissTxt: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 15,
+    color: '#0e0e10',
+    fontWeight: '700',
     letterSpacing: 0.5,
   },
   btnAcceptTxt: {

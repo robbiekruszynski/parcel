@@ -142,6 +142,7 @@ function GroupCard({
   myUserId,
   expanded,
   onToggle,
+  onInvite,
   onLeave,
   onMemberPress,
   onContributionChange,
@@ -152,6 +153,7 @@ function GroupCard({
   myUserId: string | null;
   expanded: boolean;
   onToggle: () => void;
+  onInvite: (groupId: string) => void;
   onLeave: (groupId: string, groupName: string) => void;
   onMemberPress: (userId: string) => void;
   onContributionChange: (groupId: string, userId: string, delta: number) => void;
@@ -226,11 +228,15 @@ function GroupCard({
 
           {/* Actions */}
           <View style={styles.groupActions}>
+            <Pressable style={styles.actionBtn} onPress={() => onInvite(group.id)}>
+              <FontAwesome name="user-plus" size={13} color="#f5c518" style={{ marginRight: 6 }} />
+              <Text style={styles.actionBtnText}>Invite</Text>
+            </Pressable>
             <Pressable
               style={[styles.actionBtn, styles.actionBtnDanger]}
               onPress={() => onLeave(group.id, group.name)}>
               <FontAwesome name="sign-out" size={13} color="#ef4444" style={{ marginRight: 6 }} />
-              <Text style={[styles.actionBtnText, { color: '#ef4444' }]}>Leave Group</Text>
+              <Text style={[styles.actionBtnText, { color: '#ef4444' }]}>Leave</Text>
             </Pressable>
           </View>
         </View>
@@ -250,8 +256,10 @@ export default function GroupScreen() {
   // Modals
   const [createVisible, setCreateVisible] = useState(false);
   const [joinVisible,   setJoinVisible]   = useState(false);
-  const [createName, setCreateName] = useState('');
-  const [joinCode,   setJoinCode]   = useState('');
+  const [inviteGroupId, setInviteGroupId] = useState<string | null>(null);
+  const [createName,    setCreateName]    = useState('');
+  const [joinCode,      setJoinCode]      = useState('');
+  const [inviteUsername, setInviteUsername] = useState('');
   const [busy, setBusy] = useState(false);
 
   // Player profile sheet
@@ -464,6 +472,57 @@ export default function GroupScreen() {
     }
   };
 
+  // ── Invite by username — notifies them with the group's invite code ──────
+  const handleInvite = async () => {
+    const uname = inviteUsername.trim().replace(/^@/, '').toLowerCase();
+    if (!uname || !inviteGroupId || !myUserId) return;
+    setBusy(true);
+    try {
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('username', uname)
+        .single();
+      if (error || !profile) throw new Error(`@${uname} not found`);
+
+      const { data: existing } = await supabase
+        .from('group_members')
+        .select('user_id')
+        .eq('group_id', inviteGroupId)
+        .eq('user_id', profile.id)
+        .maybeSingle();
+      if (existing) throw new Error(`@${uname} is already in this group`);
+
+      const { data: alreadyPending } = await supabase
+        .from('group_invites')
+        .select('id')
+        .eq('group_id', inviteGroupId)
+        .eq('to_user_id', profile.id)
+        .eq('status', 'pending')
+        .maybeSingle();
+      if (alreadyPending) throw new Error(`Invite already sent to @${uname}`);
+
+      const group = groups.find((g) => g.id === inviteGroupId);
+      await supabase.from('group_invites').insert({
+        group_id:     inviteGroupId,
+        from_user_id: myUserId,
+        to_user_id:   profile.id,
+        group_name:   group?.name ?? '',
+      });
+
+      setInviteUsername('');
+      setInviteGroupId(null);
+      Alert.alert(
+        'Invite sent!',
+        `@${uname} will receive a notification with the group code. They can use it under Groups → Join.`
+      );
+    } catch (e: unknown) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not send invite');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // ── Contribution % change ─────────────────────────────────────────────────
   const handleContributionChange = async (groupId: string, userId: string, delta: number) => {
     // Optimistic update
@@ -589,6 +648,7 @@ export default function GroupScreen() {
             myUserId={myUserId}
             expanded={expandedId === item.id}
             onToggle={() => toggle(item.id)}
+            onInvite={(id) => { setInviteGroupId(id); setInviteUsername(''); }}
             onLeave={handleLeave}
             onMemberPress={(uid) => setProfileUserId(uid)}
             onContributionChange={handleContributionChange}
@@ -665,6 +725,35 @@ export default function GroupScreen() {
         myUserId={myUserId}
         onClose={() => setProfileUserId(null)}
       />
+
+      {/* ── Invite by username modal ──────────────────────────────────────── */}
+      <Modal visible={!!inviteGroupId} transparent animationType="slide" onRequestClose={() => setInviteGroupId(null)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+          <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+          <Pressable style={[styles.modalBackdrop, StyleSheet.absoluteFillObject]} onPress={() => setInviteGroupId(null)} />
+          <View style={styles.modalSheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.modalTitle}>Invite Someone</Text>
+            <Text style={styles.modalSubtitle}>They'll get a notification with the group code</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="@username"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              value={inviteUsername}
+              onChangeText={setInviteUsername}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoFocus
+              editable={!busy}
+              onSubmitEditing={() => void handleInvite()}
+            />
+            <Pressable style={[styles.modalBtn, busy && { opacity: 0.5 }]} onPress={() => void handleInvite()} disabled={busy}>
+              {busy ? <ActivityIndicator color="#0e0e10" /> : <Text style={styles.modalBtnText}>Send Invite</Text>}
+            </Pressable>
+          </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
     </SafeAreaView>
   );
