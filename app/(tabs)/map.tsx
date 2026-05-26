@@ -68,10 +68,12 @@ export default function MapScreen() {
     claimParcel,
   } = useParcelTracking(activityType);
 
-  const { sendPairRequest, acceptRequest, declineRequest, cancelInvite } = usePairing();
+  const { sendPairRequest, cancelInvite } = usePairing();
 
   const partners        = usePairStore((s) => s.partners);
   const pendingInvites  = usePairStore((s) => s.pendingInvites);
+  const removePartner   = usePairStore((s) => s.removePartner);
+  const leaveParty      = usePairStore((s) => s.leaveParty);
 
   const activityLocked = isTracking || isPaused;
 
@@ -142,6 +144,34 @@ export default function MapScreen() {
           pendingInvites={pendingInvites}
           onSend={sendPairRequest}
           onCancelInvite={cancelInvite}
+          onRemovePartner={(id, username) => {
+            Alert.alert(
+              `Remove @${username ?? 'partner'}?`,
+              'They will no longer split points on your next claim.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Remove',
+                  style: 'destructive',
+                  onPress: () => removePartner(id),
+                },
+              ]
+            );
+          }}
+          onLeaveParty={() => {
+            Alert.alert(
+              'Leave walking party?',
+              'You will no longer split points with your partners.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Leave',
+                  style: 'destructive',
+                  onPress: () => leaveParty(),
+                },
+              ]
+            );
+          }}
           onClose={() => setShowFindPartner(false)}
         />
       </Modal>
@@ -172,12 +202,16 @@ function FindPartnerSheet({
   pendingInvites,
   onSend,
   onCancelInvite,
+  onRemovePartner,
+  onLeaveParty,
   onClose,
 }: {
   partners: { id: string; username: string | null }[];
   pendingInvites: { requestId: string; toUserId: string; toUsername: string }[];
   onSend: (username: string) => Promise<void>;
   onCancelInvite: (requestId: string) => Promise<void>;
+  onRemovePartner: (id: string, username: string | null) => void;
+  onLeaveParty: () => void;
   onClose: () => void;
 }) {
   const [username, setUsername] = useState('');
@@ -224,6 +258,11 @@ function FindPartnerSheet({
             <View style={partnerStyles.confirmedBadge}>
               <Text style={partnerStyles.confirmedTxt}>CONFIRMED</Text>
             </View>
+            <Pressable
+              onPress={() => onRemovePartner(p.id, p.username)}
+              style={partnerStyles.removeBtn}>
+              <Text style={partnerStyles.removeTxt}>Remove</Text>
+            </Pressable>
           </View>
         ))}
 
@@ -265,6 +304,14 @@ function FindPartnerSheet({
             ? <ActivityIndicator color="#0e0e10" size="small" />
             : <Text style={sheetStyles.btnAcceptText}>Send Request</Text>}
         </Pressable>
+
+        {partners.length > 0 && (
+          <Pressable
+            style={[sheetStyles.btn, sheetStyles.btnLeave]}
+            onPress={onLeaveParty}>
+            <Text style={sheetStyles.btnLeaveText}>Leave party</Text>
+          </Pressable>
+        )}
       </View>
     </View>
   );
@@ -556,6 +603,18 @@ const partnerStyles = StyleSheet.create({
     color: '#f87171',
     letterSpacing: 0.5,
   },
+  removeBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: 'rgba(248,113,113,0.12)',
+  },
+  removeTxt: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 10,
+    color: '#f87171',
+    letterSpacing: 0.5,
+  },
   divider: {
     height: 1,
     backgroundColor: 'rgba(255,255,255,0.07)',
@@ -663,6 +722,18 @@ const sheetStyles = StyleSheet.create({
     color: '#0e0e10',
     fontWeight: '700',
     letterSpacing: 0.5,
+  },
+  btnLeave: {
+    marginTop: 10,
+    backgroundColor: 'rgba(239,68,68,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.25)',
+  },
+  btnLeaveText: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 14,
+    color: '#ef4444',
+    letterSpacing: 0.4,
   },
 });
 

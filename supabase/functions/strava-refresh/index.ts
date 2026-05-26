@@ -80,14 +80,18 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     );
-    await adminClient
+    const { error: updateError } = await adminClient
       .from('strava_connections')
       .update({
         access_token:  tokens.access_token,
         refresh_token: tokens.refresh_token,
-        expires_at:    new Date(tokens.expires_at * 1000).toISOString(),
+        expires_at:    tokens.expires_at,
       })
       .eq('user_id', user.id);
+
+    if (updateError) {
+      console.error('[strava-refresh] failed to persist tokens', updateError.message);
+    }
 
     return new Response(JSON.stringify(tokens), {
       status: 200, headers: { ...CORS, 'Content-Type': 'application/json' },

@@ -7,7 +7,7 @@
  *  1. Check if Strava is connected + token is valid
  *  2. Refresh token server-side if expired (STRAVA_CLIENT_SECRET lives in edge fn)
  *  3. Build GPX from route
- *  4. POST multipart to Strava /uploads
+ *  4. POST multipart to Strava /uploads (retry once after refresh on 401)
  *  5. Update stravaStore with fresh tokens
  */
 
@@ -35,6 +35,94 @@ export interface StravaUploadResult {
   needsReconnect?: boolean;
 }
 
+async function refreshAccessToken(): Promise<
+  { ok: true; accessToken: string } | { ok: false; result: StravaUploadResult }
+> {
+  const store = useStravaStore.getState();
+
+  if (!store.refreshToken) {
+    return {
+      ok: false,
+      result: {
+        success: false,
+        error: 'Strava session expired — reconnect Strava in Settings.',
+      },
+    };
+  }
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await supabase.functions.invoke('strava-refresh', {
+      body: { refresh_token: store.refreshToken },
+      headers: session?.access_token
+        ? { Authorization: `Bearer ${session.access_token}` }
+        : undefined,
+    });
+
+    if (res.error) throw new Error(res.error.message);
+
+    const fresh = res.data as { access_token: string; refresh_token: string; expires_at: number };
+    if (!fresh?.access_token) throw new Error('Token refresh returned no access token');
+
+    store.setStravaTokens(
+      {
+        access_token:  fresh.access_token,
+        refresh_token: fresh.refresh_token,
+        expires_at:    fresh.expires_at,
+        athlete:       store.athlete!,
+      },
+      store.syncedUserId!,
+    );
+
+    return { ok: true, accessToken: fresh.access_token };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Token refresh failed';
+    return { ok: false, result: { success: false, error: msg } };
+  }
+}
+
+async function ensureAccessToken(): Promise<
+  { ok: true; accessToken: string } | { ok: false; result: StravaUploadResult }
+> {
+  const store = useStravaStore.getState();
+  if (!store.accessToken) {
+    return { ok: false, result: { success: false, notConnected: true } };
+  }
+
+  if (store.isTokenExpired()) {
+    return refreshAccessToken();
+  }
+
+  return { ok: true, accessToken: store.accessToken };
+}
+
+async function postStravaUpload(
+  accessToken: string,
+  formData: FormData,
+): Promise<StravaUploadResult & { unauthorized?: boolean }> {
+  const res = await fetch('https://www.strava.com/api/v3/uploads', {
+    method:  'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body:    formData,
+  });
+
+  if (res.status === 403) {
+    return { success: false, needsReconnect: true };
+  }
+
+  if (res.status === 401) {
+    return { success: false, unauthorized: true };
+  }
+
+  if (!res.ok) {
+    const body = await res.text();
+    return { success: false, error: `Strava upload failed (${res.status}): ${body}` };
+  }
+
+  const upload = await res.json() as { id: number; activity_id?: number };
+  return { success: true, activityId: upload.activity_id ?? upload.id };
+}
+
 /**
  * Upload a session route to Strava.
  *
@@ -51,40 +139,6 @@ export async function uploadSessionToStrava(
 
   if (!store.isConnected || !store.accessToken) {
     return { success: false, notConnected: true };
-  }
-
-  // ── Ensure we have a valid token ─────────────────────────────────────────────
-  let accessToken = store.accessToken;
-
-  if (store.isTokenExpired() && store.refreshToken) {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const res = await supabase.functions.invoke('strava-refresh', {
-        body: { refresh_token: store.refreshToken },
-        headers: session?.access_token
-          ? { Authorization: `Bearer ${session.access_token}` }
-          : undefined,
-      });
-
-      if (res.error) throw new Error(res.error.message);
-
-      const fresh = res.data as { access_token: string; refresh_token: string; expires_at: number };
-      accessToken = fresh.access_token;
-
-      // Update store with new tokens
-      store.setStravaTokens(
-        {
-          access_token:  fresh.access_token,
-          refresh_token: fresh.refresh_token,
-          expires_at:    fresh.expires_at,
-          athlete:       store.athlete!,
-        },
-        store.syncedUserId!,
-      );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Token refresh failed';
-      return { success: false, error: msg };
-    }
   }
 
   // ── Build GPX ────────────────────────────────────────────────────────────────
@@ -105,13 +159,11 @@ export async function uploadSessionToStrava(
     return { success: false, error: msg };
   }
 
-  // ── Upload to Strava ─────────────────────────────────────────────────────────
   const formData = new FormData();
   formData.append('activity_type', STRAVA_ACTIVITY_TYPE[activityType]);
   formData.append('name', activityName);
   formData.append('description', description);
   formData.append('data_type', 'gpx');
-  // React Native FormData accepts { uri, name, type } for binary blobs
   formData.append('file', {
     uri:  `data:application/gpx+xml;base64,${btoa(unescape(encodeURIComponent(gpxString)))}`,
     name: 'activity.gpx',
@@ -119,25 +171,30 @@ export async function uploadSessionToStrava(
   } as unknown as Blob);
 
   try {
-    const res = await fetch('https://www.strava.com/api/v3/uploads', {
-      method:  'POST',
-      headers: { Authorization: `Bearer ${accessToken}` },
-      body:    formData,
-    });
+    const tokenResult = await ensureAccessToken();
+    if (!tokenResult.ok) return tokenResult.result;
 
-    if (res.status === 403) {
-      // Missing activity:write scope — user needs to reconnect
-      return { success: false, needsReconnect: true };
+    let uploadResult = await postStravaUpload(tokenResult.accessToken, formData);
+
+    // Strava rejected the token — refresh once and retry.
+    if (!uploadResult.success && uploadResult.unauthorized) {
+      const refreshResult = await refreshAccessToken();
+      if (!refreshResult.ok) return refreshResult.result;
+      uploadResult = await postStravaUpload(refreshResult.accessToken, formData);
     }
 
-    if (!res.ok) {
-      const body = await res.text();
-      return { success: false, error: `Strava upload failed (${res.status}): ${body}` };
+    if (!uploadResult.success) {
+      const { unauthorized: _ignored, ...result } = uploadResult;
+      if (!result.error && uploadResult.unauthorized) {
+        return {
+          success: false,
+          error: 'Strava session expired — reconnect Strava in Settings.',
+        };
+      }
+      return result;
     }
 
-    const upload = await res.json() as { id: number; activity_id?: number };
-    return { success: true, activityId: upload.activity_id ?? upload.id };
-
+    return uploadResult;
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Upload request failed';
     return { success: false, error: msg };

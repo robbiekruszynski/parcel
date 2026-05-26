@@ -40,6 +40,8 @@ interface PairState {
   removePendingInvite:(requestId: string) => void;
   setIncomingRequest: (req: IncomingPairRequest | null) => void;
   clearPairing:       () => void;
+  /** Drop confirmed partners but keep pending/outgoing invites. */
+  leaveParty:         () => void;
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────
@@ -70,4 +72,6 @@ export const usePairStore = create<PairState>((set) => ({
 
   clearPairing: () =>
     set({ partners: [], pendingInvites: [], incomingRequest: null }),
+
+  leaveParty: () => set({ partners: [] }),
 }));

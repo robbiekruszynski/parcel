@@ -22,6 +22,7 @@ import {
   Pressable,
   RefreshControl,
   SafeAreaView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -70,12 +71,14 @@ function avatarInitials(name: string | null, username: string | null): string {
 // ─── Member row ───────────────────────────────────────────────────────────────
 
 function MemberRow({
-  member, isMe, onPress, onContributionChange,
+  member, isMe, isAdmin, onPress, onContributionChange, onRemove,
 }: {
   member: GroupMember;
   isMe: boolean;
+  isAdmin: boolean;
   onPress: () => void;
   onContributionChange?: (delta: number) => void;
+  onRemove?: () => void;
 }) {
   return (
     <Pressable
@@ -120,6 +123,13 @@ function MemberRow({
           {member.points_total.toLocaleString()} pts
         </Text>
         <Text style={styles.memberParcels}>{member.parcel_count} parcels</Text>
+        {isAdmin && !isMe && onRemove && (
+          <Pressable
+            style={styles.memberRemoveBtn}
+            onPress={(e) => { e.stopPropagation(); onRemove(); }}>
+            <Text style={styles.memberRemoveTxt}>Remove</Text>
+          </Pressable>
+        )}
       </View>
     </Pressable>
   );
@@ -136,6 +146,8 @@ function GroupCard({
   onLeave,
   onMemberPress,
   onContributionChange,
+  onRemoveMember,
+  onShareCode,
 }: {
   group: Group;
   myUserId: string | null;
@@ -145,8 +157,12 @@ function GroupCard({
   onLeave: (groupId: string, groupName: string) => void;
   onMemberPress: (userId: string) => void;
   onContributionChange: (groupId: string, userId: string, delta: number) => void;
+  onRemoveMember: (groupId: string, userId: string, username: string | null) => void;
+  onShareCode: (code: string, groupName: string) => void;
 }) {
   const totalParcels = group.members.reduce((s, m) => s + m.parcel_count, 0);
+  const myMembership = group.members.find((m) => m.user_id === myUserId);
+  const isAdmin = myMembership?.role === 'admin' || group.created_by === myUserId;
 
   return (
     <View style={styles.groupCard}>
@@ -179,14 +195,36 @@ function GroupCard({
               key={m.user_id}
               member={m}
               isMe={m.user_id === myUserId}
+              isAdmin={isAdmin}
               onPress={() => onMemberPress(m.user_id)}
               onContributionChange={
                 m.user_id === myUserId
                   ? (delta) => onContributionChange(group.id, m.user_id, delta)
                   : undefined
               }
+              onRemove={
+                isAdmin && m.user_id !== myUserId
+                  ? () => onRemoveMember(group.id, m.user_id, m.username)
+                  : undefined
+              }
             />
           ))}
+
+          {group.invite_code ? (
+            <View style={styles.inviteCodeBox}>
+              <Text style={styles.inviteCodeLabel}>Invite code</Text>
+              <Text style={styles.inviteCodeValue}>{group.invite_code}</Text>
+              <Text style={styles.inviteCodeHint}>
+                Share this 6-character code so friends can join your group.
+              </Text>
+              <Pressable
+                style={styles.inviteCodeShareBtn}
+                onPress={() => onShareCode(group.invite_code!, group.name)}>
+                <FontAwesome name="share-alt" size={12} color="#0e0e10" style={{ marginRight: 6 }} />
+                <Text style={styles.inviteCodeShareTxt}>Share code</Text>
+              </Pressable>
+            </View>
+          ) : null}
 
           {/* Actions */}
           <View style={styles.groupActions}>
@@ -214,6 +252,7 @@ interface PendingGroupInvite {
   group_id: string;
   group_name: string;
   from_username: string | null;
+  invite_code: string | null;
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -233,6 +272,7 @@ export default function GroupScreen() {
   const [inviteGroupId, setInviteGroupId] = useState<string | null>(null);
   const [createName, setCreateName]     = useState('');
   const [joinCode,   setJoinCode]       = useState('');
+  const [inviteCodeInputs, setInviteCodeInputs] = useState<Record<string, string>>({});
   const [inviteUsername, setInviteUsername] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -253,7 +293,7 @@ export default function GroupScreen() {
       // Load pending invites I've received
       const { data: inviteRows } = await supabase
         .from('group_invites')
-        .select('id, group_id, group_name, from_user_id, profiles!group_invites_from_user_id_fkey(username)')
+        .select('id, group_id, group_name, from_user_id, profiles!group_invites_from_user_id_fkey(username), groups(invite_code)')
         .eq('to_user_id', uid)
         .eq('status', 'pending')
         .gt('expires_at', new Date().toISOString());
@@ -262,11 +302,13 @@ export default function GroupScreen() {
         setPendingInvites(
           inviteRows.map((r) => {
             const profile = Array.isArray(r.profiles) ? r.profiles[0] : r.profiles;
+            const group = Array.isArray(r.groups) ? r.groups[0] : r.groups;
             return {
               id:            r.id,
               group_id:      r.group_id,
               group_name:    r.group_name,
               from_username: (profile as { username?: string | null } | null)?.username ?? null,
+              invite_code:   (group as { invite_code?: string | null } | null)?.invite_code ?? null,
             };
           })
         );
@@ -446,6 +488,21 @@ export default function GroupScreen() {
       setCreateName('');
       setCreateVisible(false);
       await load();
+      Alert.alert(
+        'Group created!',
+        `Your invite code is ${invite_code}. Share it so friends can join.`,
+        [
+          {
+            text: 'Share',
+            onPress: () => {
+              void Share.share({
+                message: `Join my group "${name}" on Parcel! Invite code: ${invite_code}`,
+              });
+            },
+          },
+          { text: 'OK' },
+        ]
+      );
     } catch (e: unknown) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Could not create group');
     } finally {
@@ -503,7 +560,7 @@ export default function GroupScreen() {
       setInviteGroupId(null);
       Alert.alert(
         'Invite sent!',
-        `@${uname} will get a notification to join ${group?.name ?? 'the group'}.`
+        `@${uname} will get a notification to join. Share your group's 6-character invite code so they can enter it when accepting.`,
       );
     } catch (e: unknown) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Could not send invite');
@@ -515,7 +572,24 @@ export default function GroupScreen() {
   // ── Accept / decline a pending group invite ────────────────────────────────
   const handleAcceptInvite = async (invite: PendingGroupInvite) => {
     if (!myUserId) return;
+    const entered = (inviteCodeInputs[invite.id] ?? '').trim().toUpperCase();
+    if (entered.length !== 6) {
+      Alert.alert('Enter invite code', 'Type the 6-character code shared with you.');
+      return;
+    }
+    if (invite.invite_code && entered !== invite.invite_code.toUpperCase()) {
+      Alert.alert('Wrong code', 'That invite code does not match this group.');
+      return;
+    }
     try {
+      const { count } = await supabase
+        .from('group_members')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', myUserId);
+      if ((count ?? 0) >= 3) {
+        throw new Error('You can be in up to 3 groups at a time. Leave a group first.');
+      }
+
       const [upd, ins] = await Promise.all([
         supabase.from('group_invites').update({ status: 'accepted' }).eq('id', invite.id),
         supabase.from('group_members').insert({ group_id: invite.group_id, user_id: myUserId, role: 'member' }),
@@ -523,6 +597,11 @@ export default function GroupScreen() {
       if (upd.error) throw new Error(upd.error.message);
       if (ins.error && !ins.error.message.includes('duplicate')) throw new Error(ins.error.message);
       setPendingInvites((prev) => prev.filter((i) => i.id !== invite.id));
+      setInviteCodeInputs((prev) => {
+        const next = { ...prev };
+        delete next[invite.id];
+        return next;
+      });
       await load();
       Alert.alert('Joined!', `You're now in ${invite.group_name}.`);
     } catch (e: unknown) {
@@ -567,7 +646,7 @@ export default function GroupScreen() {
 
   // ── Leave group ───────────────────────────────────────────────────────────
   const handleLeave = (groupId: string, groupName: string) => {
-    Alert.alert(`Leave ${groupName}?`, 'You can rejoin later if someone invites you.', [
+    Alert.alert(`Leave ${groupName}?`, 'You can rejoin later with the invite code.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Leave',
@@ -582,6 +661,34 @@ export default function GroupScreen() {
         },
       },
     ]);
+  };
+
+  const handleRemoveMember = (groupId: string, userId: string, username: string | null) => {
+    Alert.alert(
+      `Remove @${username ?? 'member'}?`,
+      'They can rejoin later with the invite code.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            await supabase
+              .from('group_members')
+              .delete()
+              .eq('group_id', groupId)
+              .eq('user_id', userId);
+            await load();
+          },
+        },
+      ]
+    );
+  };
+
+  const handleShareCode = (code: string, groupName: string) => {
+    void Share.share({
+      message: `Join my group "${groupName}" on Parcel! Invite code: ${code}`,
+    });
   };
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -614,6 +721,21 @@ export default function GroupScreen() {
                 <Text style={styles.pendingFrom}>
                   from @{inv.from_username ?? 'unknown'}
                 </Text>
+                <TextInput
+                  style={styles.pendingCodeInput}
+                  placeholder="Enter 6-char code"
+                  placeholderTextColor="rgba(255,255,255,0.25)"
+                  value={inviteCodeInputs[inv.id] ?? ''}
+                  onChangeText={(t) =>
+                    setInviteCodeInputs((prev) => ({
+                      ...prev,
+                      [inv.id]: t.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6),
+                    }))
+                  }
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  maxLength={6}
+                />
               </View>
               <View style={styles.pendingActions}>
                 <Pressable
@@ -622,8 +744,12 @@ export default function GroupScreen() {
                   <Text style={styles.pendingDeclineTxt}>Decline</Text>
                 </Pressable>
                 <Pressable
-                  style={styles.pendingAcceptBtn}
-                  onPress={() => void handleAcceptInvite(inv)}>
+                  style={[
+                    styles.pendingAcceptBtn,
+                    (inviteCodeInputs[inv.id]?.length ?? 0) !== 6 && { opacity: 0.45 },
+                  ]}
+                  onPress={() => void handleAcceptInvite(inv)}
+                  disabled={(inviteCodeInputs[inv.id]?.length ?? 0) !== 6}>
                   <Text style={styles.pendingAcceptTxt}>Join</Text>
                 </Pressable>
               </View>
@@ -665,6 +791,8 @@ export default function GroupScreen() {
             onLeave={handleLeave}
             onMemberPress={(uid) => setProfileUserId(uid)}
             onContributionChange={handleContributionChange}
+            onRemoveMember={handleRemoveMember}
+            onShareCode={handleShareCode}
           />
         )}
       />
@@ -716,8 +844,14 @@ export default function GroupScreen() {
               editable={!busy}
               onSubmitEditing={() => void handleJoinByCode()}
             />
-            <Pressable style={[styles.modalBtn, busy && { opacity: 0.5 }]} onPress={() => void handleJoinByCode()} disabled={busy}>
-              {busy ? <ActivityIndicator color="#0e0e10" /> : <Text style={styles.modalBtnText}>Join Group</Text>}
+            <Pressable style={[styles.modalBtn, busy && { opacity: 0.5 }]} onPress={() => void handleJoinByCode()} disabled={busy || joinCode.length !== 6}>
+              {busy ? <ActivityIndicator color="#0e0e10" /> : <Text style={styles.modalBtnText}>Join</Text>}
+            </Pressable>
+            <Pressable
+              style={[styles.modalBtnSecondary, busy && { opacity: 0.5 }]}
+              onPress={() => { setJoinCode(''); setJoinVisible(false); }}
+              disabled={busy}>
+              <Text style={styles.modalBtnSecondaryText}>Decline</Text>
             </Pressable>
           </View>
           </View>
@@ -940,6 +1074,67 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: 'rgba(255,255,255,0.3)',
   },
+  memberRemoveBtn: {
+    marginTop: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: 'rgba(239,68,68,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.25)',
+  },
+  memberRemoveTxt: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 10,
+    color: '#ef4444',
+    letterSpacing: 0.3,
+  },
+
+  inviteCodeBox: {
+    marginTop: 12,
+    marginBottom: 4,
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: 'rgba(167,139,250,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(167,139,250,0.22)',
+    alignItems: 'center',
+  },
+  inviteCodeLabel: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 10,
+    letterSpacing: 1.5,
+    color: 'rgba(167,139,250,0.65)',
+    marginBottom: 6,
+  },
+  inviteCodeValue: {
+    fontFamily: 'Rajdhani_700Bold',
+    fontSize: 28,
+    letterSpacing: 6,
+    color: '#fff',
+  },
+  inviteCodeHint: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.35)',
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 12,
+    lineHeight: 18,
+  },
+  inviteCodeShareBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: AMBER,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  inviteCodeShareTxt: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 13,
+    color: '#0e0e10',
+  },
 
   // Group actions
   groupActions: {
@@ -1031,6 +1226,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: 'rgba(255,255,255,0.4)',
     marginTop: 2,
+    marginBottom: 8,
+  },
+  pendingCodeInput: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(167,139,250,0.3)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    color: '#fff',
+    fontFamily: 'Rajdhani_700Bold',
+    fontSize: 16,
+    letterSpacing: 4,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+    marginRight: 8,
   },
   pendingActions: {
     flexDirection: 'row',
@@ -1118,11 +1329,25 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
+    marginBottom: 10,
   },
   modalBtnText: {
     fontFamily: 'Rajdhani_600SemiBold',
     fontSize: 15,
     color: '#0e0e10',
     fontWeight: '700',
+  },
+  modalBtnSecondary: {
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  modalBtnSecondaryText: {
+    fontFamily: 'Rajdhani_600SemiBold',
+    fontSize: 15,
+    color: 'rgba(255,255,255,0.5)',
   },
 });

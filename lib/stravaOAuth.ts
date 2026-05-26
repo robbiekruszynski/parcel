@@ -1,6 +1,6 @@
 import * as AuthSession from 'expo-auth-session';
 
-import { STRAVA_CLIENT_ID } from '@/lib/strava';
+import { STRAVA_CLIENT_ID, STRAVA_SCOPES } from '@/lib/strava';
 
 export type StravaOAuthIntent = 'sign_in' | 'connect';
 
@@ -50,7 +50,7 @@ export function buildStravaAuthorizeUrl(
     redirect_uri: redirectUri,
     response_type: 'code',
     approval_prompt: options?.forceApproval ? 'force' : 'auto',
-    scope: 'read,activity:read_all',
+    scope: STRAVA_SCOPES,
   });
 
   return `https://www.strava.com/oauth/mobile/authorize?${params.toString()}`;

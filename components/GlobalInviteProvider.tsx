@@ -8,9 +8,6 @@
  *  2. group_invites  — INSERT where to_user_id = me
  *
  * Shows bottom-sheet modals for accept / decline.
- * This replaces the per-tab approach where the user had to be on the
- * map tab to receive pair-request notifications, and where group invites
- * were silently added with no notification at all.
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -22,6 +19,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 
@@ -35,6 +33,7 @@ interface IncomingGroupInvite {
   groupId: string;
   groupName: string;
   fromUsername: string | null;
+  inviteCode: string | null;
 }
 
 // ─── Provider ────────────────────────────────────────────────────────────────
@@ -44,19 +43,63 @@ export function GlobalInviteProvider() {
 
   const incomingPair  = usePairStore((s) => s.incomingRequest);
   const [groupInvite, setGroupInvite] = useState<IncomingGroupInvite | null>(null);
+  const [groupCodeInput, setGroupCodeInput] = useState('');
   const [pairBusy,  setPairBusy]  = useState(false);
   const [groupBusy, setGroupBusy] = useState(false);
+
+  const hydrateGroupInvite = async (row: {
+    id: string;
+    group_id: string;
+    group_name: string;
+    from_user_id: string;
+  }) => {
+    const [{ data: profile }, { data: group }] = await Promise.all([
+      supabase.from('profiles').select('username').eq('id', row.from_user_id).single(),
+      supabase.from('groups').select('invite_code').eq('id', row.group_id).single(),
+    ]);
+
+    setGroupCodeInput('');
+    setGroupInvite({
+      id:           row.id,
+      groupId:      row.group_id,
+      groupName:    row.group_name,
+      fromUsername: profile?.username ?? null,
+      inviteCode:   group?.invite_code ?? null,
+    });
+  };
 
   // ── Load current user ID once ─────────────────────────────────────────────
   useEffect(() => {
     void supabase.auth.getSession().then(({ data: { session } }) => {
       myUserIdRef.current = session?.user?.id ?? null;
     });
-    // Keep in sync on sign-in / sign-out
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_ev, session) => {
       myUserIdRef.current = session?.user?.id ?? null;
     });
     return () => subscription.unsubscribe();
+  }, []);
+
+  // ── Load pending group invites on mount (cold start) ─────────────────────
+  useEffect(() => {
+    const loadPending = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const uid = session?.user?.id;
+      if (!uid) return;
+
+      const { data: rows } = await supabase
+        .from('group_invites')
+        .select('id, group_id, group_name, from_user_id, expires_at, status')
+        .eq('to_user_id', uid)
+        .eq('status', 'pending')
+        .gt('expires_at', new Date().toISOString())
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      const row = rows?.[0];
+      if (row) await hydrateGroupInvite(row);
+    };
+
+    void loadPending();
   }, []);
 
   // ── Pair requests — global subscription ──────────────────────────────────
@@ -117,18 +160,7 @@ export function GlobalInviteProvider() {
           if (row.status !== 'pending') return;
           if (row.expires_at && new Date(row.expires_at) < new Date()) return;
 
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('username')
-            .eq('id', row.from_user_id)
-            .single();
-
-          setGroupInvite({
-            id:           row.id,
-            groupId:      row.group_id,
-            groupName:    row.group_name,
-            fromUsername: profile?.username ?? null,
-          });
+          await hydrateGroupInvite(row);
         }
       )
       .subscribe();
@@ -172,8 +204,27 @@ export function GlobalInviteProvider() {
 
   const acceptGroupInvite = async () => {
     if (!groupInvite || !myUserIdRef.current) return;
+
+    const entered = groupCodeInput.trim().toUpperCase();
+    if (entered.length !== 6) {
+      Alert.alert('Enter invite code', 'Type the 6-character code shared with you.');
+      return;
+    }
+    if (groupInvite.inviteCode && entered !== groupInvite.inviteCode.toUpperCase()) {
+      Alert.alert('Wrong code', 'That invite code does not match this group.');
+      return;
+    }
+
     setGroupBusy(true);
     try {
+      const { count } = await supabase
+        .from('group_members')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', myUserIdRef.current);
+      if ((count ?? 0) >= 3) {
+        throw new Error('You can be in up to 3 groups at a time. Leave a group first.');
+      }
+
       const [updateRes, insertRes] = await Promise.all([
         supabase
           .from('group_invites')
@@ -188,6 +239,7 @@ export function GlobalInviteProvider() {
         throw new Error(insertRes.error.message);
       }
       setGroupInvite(null);
+      setGroupCodeInput('');
       Alert.alert('Joined!', `You're now a member of ${groupInvite.groupName}.`);
     } catch (e: unknown) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Could not accept invite');
@@ -203,6 +255,7 @@ export function GlobalInviteProvider() {
       .update({ status: 'declined' })
       .eq('id', groupInvite.id);
     setGroupInvite(null);
+    setGroupCodeInput('');
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -241,23 +294,92 @@ export function GlobalInviteProvider() {
         animationType="slide"
         onRequestClose={() => void declineGroupInvite()}>
         {groupInvite ? (
-          <InviteSheet
-            icon="account-group"
-            iconColor="#a78bfa"
-            title="Group Invite"
-            body={
-              `@${groupInvite.fromUsername ?? 'someone'} invited you to join "${groupInvite.groupName}".`
-            }
-            highlightWord={`@${groupInvite.fromUsername ?? 'someone'}`}
-            acceptLabel="Join Group"
-            acceptColor="#a78bfa"
+          <GroupInviteSheet
+            groupName={groupInvite.groupName}
+            fromUsername={groupInvite.fromUsername}
+            code={groupCodeInput}
+            onCodeChange={(t) => setGroupCodeInput(t.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))}
             busy={groupBusy}
-            onAccept={() => void acceptGroupInvite()}
+            onJoin={() => void acceptGroupInvite()}
             onDecline={() => void declineGroupInvite()}
           />
         ) : null}
       </Modal>
     </>
+  );
+}
+
+// ─── Group invite sheet (code entry + JOIN / DECLINE) ────────────────────────
+
+function GroupInviteSheet({
+  groupName,
+  fromUsername,
+  code,
+  onCodeChange,
+  busy,
+  onJoin,
+  onDecline,
+}: {
+  groupName: string;
+  fromUsername: string | null;
+  code: string;
+  onCodeChange: (value: string) => void;
+  busy: boolean;
+  onJoin: () => void;
+  onDecline: () => void;
+}) {
+  return (
+    <View style={s.backdrop}>
+      <View style={s.sheet}>
+        <View style={s.handle} />
+
+        <MaterialCommunityIcons
+          name="account-group"
+          size={40}
+          color="#a78bfa"
+          style={{ alignSelf: 'center', marginBottom: 14 }}
+        />
+
+        <Text style={s.title}>Group Invite</Text>
+        <Text style={s.body}>
+          <Text style={[s.highlight, { color: '#a78bfa' }]}>
+            @{fromUsername ?? 'someone'}
+          </Text>
+          {` invited you to join "${groupName}". Enter the 6-character invite code to join.`}
+        </Text>
+
+        <TextInput
+          style={s.codeInput}
+          placeholder="ABC123"
+          placeholderTextColor="rgba(255,255,255,0.25)"
+          value={code}
+          onChangeText={onCodeChange}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          maxLength={6}
+          editable={!busy}
+          onSubmitEditing={onJoin}
+        />
+
+        <View style={s.btnRow}>
+          <Pressable
+            style={[s.btn, s.btnDecline]}
+            onPress={onDecline}
+            disabled={busy}>
+            <Text style={s.btnDeclineTxt}>Decline</Text>
+          </Pressable>
+
+          <Pressable
+            style={[s.btn, { backgroundColor: '#a78bfa' }, busy && { opacity: 0.6 }]}
+            onPress={onJoin}
+            disabled={busy || code.length !== 6}>
+            {busy
+              ? <ActivityIndicator color="#0e0e10" size="small" />
+              : <Text style={s.btnAcceptTxt}>Join</Text>}
+          </Pressable>
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -286,7 +408,6 @@ function InviteSheet({
   onAccept: () => void;
   onDecline: () => void;
 }) {
-  // Render the body with the first occurrence of highlightWord coloured
   const idx = body.indexOf(highlightWord);
   const before = idx >= 0 ? body.slice(0, idx) : body;
   const after  = idx >= 0 ? body.slice(idx + highlightWord.length) : '';
@@ -377,11 +498,26 @@ const s = StyleSheet.create({
     color: 'rgba(255,255,255,0.6)',
     textAlign: 'center',
     lineHeight: 22,
-    marginBottom: 28,
+    marginBottom: 20,
   },
   highlight: {
     fontFamily: 'Rajdhani_600SemiBold',
     fontWeight: '700',
+  },
+  codeInput: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(167,139,250,0.35)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: '#fff',
+    fontFamily: 'Rajdhani_700Bold',
+    fontSize: 22,
+    letterSpacing: 6,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+    marginBottom: 24,
   },
   btnRow: {
     flexDirection: 'row',
