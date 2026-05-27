@@ -2,8 +2,9 @@ import type { ActivityType } from '@/hooks/useParcelTracking';
 import { uploadSessionToStrava } from '@/lib/stravaUpload';
 import { useStravaStore } from '@/stores/stravaStore';
 
-const RECONNECT_MSG =
-  'Strava session expired — open Profile → Settings and reconnect Strava. Your activity is saved and will upload automatically.';
+import { STRAVA_RECONNECT_MSG } from '@/lib/stravaUpload';
+
+export const RECONNECT_MSG = `${STRAVA_RECONNECT_MSG} Your activity is saved and will upload automatically.`;
 
 /** Run a queued upload if one is waiting and Strava is connected again. */
 export async function retryQueuedStravaUpload(): Promise<void> {
@@ -41,5 +42,3 @@ export async function retryQueuedStravaUpload(): Promise<void> {
 export function markStravaUploadForRetry(): void {
   useStravaStore.getState().setUploadQueued(true);
 }
-
-export { RECONNECT_MSG };

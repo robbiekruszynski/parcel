@@ -1,9 +1,9 @@
 /**
  * map.tsx — Main map screen
  *
- * The activity selector at the top serves dual purpose:
- *  1. Filters which parcels are shown (each activity is its own competition layer)
- *  2. Tags any new recording with that activity type
+ * Activity selector:
+ *  1. Map layer — show all users' parcels for that activity only (Walk / Run / …)
+ *  2. Tags new recordings with that activity type
  *
  * Locked during an active session — can't switch layers mid-recording.
  */
@@ -79,8 +79,7 @@ export default function MapScreen() {
 
   return (
     <View style={StyleSheet.absoluteFillObject}>
-      {/* ── Full-screen map — filtered to selected activity layer ────────── */}
-      <ParcelMap activityFilter={activityType} />
+      <ParcelMap activityLayer={activityType} />
 
       {/* ── Activity / layer selector ─────────────────────────────────────── */}
       <View

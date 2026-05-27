@@ -31,6 +31,7 @@ import {
 
 import { PlayerProfileSheet } from '@/components/PlayerProfileSheet';
 import { buildGroupJoinDeepLink, lookupGroupByCode } from '@/lib/groupJoin';
+import { notifyPendingGroupJoin } from '@/lib/groupInviteNotify';
 import { supabase } from '@/lib/supabase';
 import { useGroupJoinStore } from '@/stores/groupJoinStore';
 
@@ -385,11 +386,15 @@ export default function GroupScreen() {
       if (existing) throw new Error("You're already in this group");
 
       await useGroupJoinStore.getState().setPending({
-        groupId:    group.id,
-        groupName:  group.name,
-        inviteCode: group.invite_code,
-        source:     'code',
+        groupId:         group.id,
+        groupName:       group.name,
+        inviteCode:      group.invite_code,
+        source:          'code',
+        creatorUsername: group.creatorUsername,
+        memberCount:     group.memberCount,
       });
+
+      await notifyPendingGroupJoin(group.name);
 
       setJoinCode('');
       setJoinVisible(false);

@@ -7,6 +7,8 @@
 
 import { create } from 'zustand';
 
+import { syncPartnerToActiveSession } from '@/lib/syncPartnerToSession';
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface Partner {
@@ -51,13 +53,15 @@ export const usePairStore = create<PairState>((set) => ({
   pendingInvites:  [],
   incomingRequest: null,
 
-  addPartner: (partner) =>
+  addPartner: (partner) => {
     set((s) => ({
       partners: s.partners.some((p) => p.id === partner.id)
         ? s.partners
         : [...s.partners, partner],
       pendingInvites: s.pendingInvites.filter((i) => i.toUserId !== partner.id),
-    })),
+    }));
+    void syncPartnerToActiveSession(partner.id);
+  },
 
   removePartner: (id) =>
     set((s) => ({ partners: s.partners.filter((p) => p.id !== id) })),

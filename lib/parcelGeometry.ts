@@ -57,7 +57,11 @@ export function routeLengthMeters(route: Coord[]): number {
  * of their starting point, has enough points, and has covered enough distance
  * that GPS jitter alone cannot trigger a false loop-close.
  */
-export function isLoopClosed(route: Coord[]): boolean {
+export function isLoopClosed(
+  route: Coord[],
+  options?: { alreadyClaimedThisSession?: boolean },
+): boolean {
+  if (options?.alreadyClaimedThisSession) return false;
   if (route.length < MIN_PARCEL_POINTS + 1) return false;
   if (routeLengthMeters(route) < MIN_LOOP_DISTANCE_M) return false;
   return (
@@ -150,9 +154,17 @@ export function prepareClaimRoute(route: Coord[]): Coord[] {
   trimmed = [...trimmed.slice(0, -1), { ...start, ts: trimmed[trimmed.length - 1].ts }];
 
   let ring = filterRingSpikes(coordsToRing(trimmed));
-  ring = simplifyAndUnkinkRing(ring);
 
-  const cleaned = ringToCoords(ring);
+  try {
+    ring = simplifyAndUnkinkRing(ring);
+  } catch {
+    // Keep spike-filtered ring if simplify/unkink fails
+  }
+
+  let cleaned = ringToCoords(ring);
+  if (cleaned.length < MIN_PARCEL_POINTS) {
+    cleaned = trimmed;
+  }
   if (cleaned.length < MIN_PARCEL_POINTS) {
     throw new Error('Route too short after cleaning — keep moving.');
   }
@@ -171,13 +183,18 @@ export function sanitizeStoredRing(pairs: [number, number][]): [number, number][
   if (valid.length < MIN_PARCEL_POINTS) return null;
 
   const asCoords: Coord[] = valid.map(([lat, lng], i) => ({ lat, lng, ts: i }));
+  const ring = filterRingSpikes(coordsToRing(asCoords));
+  if (ring.length < 3) return null;
+
   try {
-    const ring = simplifyAndUnkinkRing(filterRingSpikes(coordsToRing(asCoords)));
-    const cleaned = ringToCoords(ring).map((c) => [c.lat, c.lng] as [number, number]);
-    return cleaned.length >= 3 ? cleaned : null;
+    const simplified = simplifyAndUnkinkRing(ring);
+    const cleaned = ringToCoords(simplified).map((c) => [c.lat, c.lng] as [number, number]);
+    if (cleaned.length >= 3) return cleaned;
   } catch {
-    return valid.length >= 3 ? valid : null;
+    // fall through to raw ring
   }
+
+  return valid.length >= 3 ? valid : null;
 }
 
 /** GeoJSON ring [lng,lat][] for one parcel — never connects separate parcels. */
@@ -202,8 +219,12 @@ export function buildGeoJsonPolygon(route: Coord[]) {
 /**
  * Area of the parcel polygon in square metres (via Turf).
  */
+/** Area for live UI preview — does not run full claim cleaning. */
 export function calculateAreaM2(route: Coord[]): number {
-  return area(buildGeoJsonPolygon(prepareClaimRoute(route)));
+  if (route.length < MIN_PARCEL_POINTS) {
+    throw new Error('Route too short');
+  }
+  return area(buildGeoJsonPolygon(route));
 }
 
 // ─── Storage format helpers ───────────────────────────────────────────────────

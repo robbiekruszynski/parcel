@@ -16,10 +16,15 @@ import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 export const BACKGROUND_LOCATION_TASK = 'parcel-background-location';
 
 let activeTrackingUserId: string | null = null;
+let activeSessionId: string | null = null;
 let taskRegistered = false;
 
-export function setBackgroundTrackingUserId(uid: string | null) {
+export function setBackgroundTrackingContext(
+  uid: string | null,
+  sessionId: string | null,
+) {
   activeTrackingUserId = uid;
+  activeSessionId = sessionId;
 }
 
 async function persistBackgroundSample(loc: Location.LocationObject) {
@@ -34,6 +39,7 @@ async function persistBackgroundSample(loc: Location.LocationObject) {
     user_id: uid,
     lat: coord.lat,
     lng: coord.lng,
+    session_id: activeSessionId,
   });
 
   if (__DEV__ && error) {

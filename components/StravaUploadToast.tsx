@@ -18,7 +18,10 @@ import { useEffect, useRef } from 'react';
 import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { RECONNECT_MSG, retryQueuedStravaUpload } from '@/lib/stravaUploadQueue';
+import { STRAVA_RECONNECT_MSG } from '@/lib/stravaUpload';
+import { retryQueuedStravaUpload } from '@/lib/stravaUploadQueue';
+
+const RECONNECT_MSG = `${STRAVA_RECONNECT_MSG} Your activity is saved and will upload automatically.`;
 import { useStravaStore, type StravaUploadStatus } from '@/stores/stravaStore';
 
 // ─── Component ────────────────────────────────────────────────────────────────

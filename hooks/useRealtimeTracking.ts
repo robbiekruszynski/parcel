@@ -5,16 +5,22 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
 import {
-  setBackgroundTrackingUserId,
+  setBackgroundTrackingContext,
   startBackgroundLocationWatch,
   stopBackgroundLocationWatch,
 } from '@/lib/backgroundLocationTask';
+import {
+  startSessionNotification,
+  stopSessionNotification,
+} from '@/lib/sessionNotification';
+import { addSessionParticipant } from '@/lib/sessionParticipants';
 import {
   coordFromLocation,
   MAP_TRACKING_WATCH_OPTIONS,
 } from '@/lib/mapLocation';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { useLocationStore } from '@/stores/locationStore';
+import { useSessionStore } from '@/stores/sessionStore';
 
 const KEEP_AWAKE_TAG = 'parcel-tracking';
 
@@ -28,6 +34,7 @@ export type TrackingPermissionState =
 async function applyLocationSample(
   loc: Location.LocationObject,
   uid: string,
+  sessionId: string | null,
 ): Promise<void> {
   const coord = coordFromLocation(loc);
   if (!coord) return;
@@ -39,6 +46,7 @@ async function applyLocationSample(
     user_id: uid,
     lat: coord.lat,
     lng: coord.lng,
+    session_id: sessionId,
   });
 
   if (__DEV__ && error) {
@@ -51,12 +59,12 @@ async function applyLocationSample(
  * the in-memory route. Called when the app returns to the foreground so that
  * any gaps recorded by the background task are filled in.
  */
-async function rebuildRouteFromDB(uid: string, sessionStartedAt: string): Promise<void> {
+async function rebuildRouteFromDB(uid: string, sessionId: string): Promise<void> {
   const { data } = await supabase
     .from('locations')
     .select('lat, lng, recorded_at')
     .eq('user_id', uid)
-    .gte('recorded_at', sessionStartedAt)
+    .eq('session_id', sessionId)
     .order('recorded_at', { ascending: true });
 
   if (!data || data.length < 2) return;
@@ -87,19 +95,19 @@ export function useRealtimeTracking() {
     watchRef.current = null;
   }, []);
 
-  const startForegroundWatch = useCallback(async (uid: string) => {
+  const startForegroundWatch = useCallback(async (uid: string, sessionId: string | null) => {
     stopForegroundWatch();
 
     watchRef.current = await Location.watchPositionAsync(
       MAP_TRACKING_WATCH_OPTIONS,
       (loc) => {
-        void applyLocationSample(loc, uid);
+        void applyLocationSample(loc, uid, sessionId);
       },
     );
   }, [stopForegroundWatch]);
 
-  const startLocationWatch = useCallback(async (uid: string) => {
-    setBackgroundTrackingUserId(uid);
+  const startLocationWatch = useCallback(async (uid: string, sessionId: string | null) => {
+    setBackgroundTrackingContext(uid, sessionId);
     const bgStarted = await startBackgroundLocationWatch();
 
     if (bgStarted) {
@@ -107,13 +115,14 @@ export function useRealtimeTracking() {
       return;
     }
 
-    await startForegroundWatch(uid);
+    await startForegroundWatch(uid, sessionId);
   }, [startForegroundWatch, stopForegroundWatch]);
 
   const stopTracking = useCallback(async () => {
     stopForegroundWatch();
     await stopBackgroundLocationWatch();
-    setBackgroundTrackingUserId(null);
+    setBackgroundTrackingContext(null, null);
+    await stopSessionNotification();
     KeepAwake.deactivateKeepAwake(KEEP_AWAKE_TAG);
 
     if (channelRef.current) {
@@ -122,6 +131,7 @@ export function useRealtimeTracking() {
     }
 
     uidRef.current = null;
+    useSessionStore.getState().endSession();
     useLocationStore.getState().setSessionStartedAt(null);
     useLocationStore.getState().setIsPaused(false);
     useLocationStore.getState().setIsTracking(false);
@@ -155,11 +165,16 @@ export function useRealtimeTracking() {
     setPermissionIssue('idle');
     useLocationStore.getState().setIsPaused(false);
     await KeepAwake.activateKeepAwakeAsync(KEEP_AWAKE_TAG);
-    await startLocationWatch(uid);
+    const sessionId = useSessionStore.getState().sessionId;
+    await startLocationWatch(uid, sessionId);
   }, [startLocationWatch]);
 
   const startTracking = useCallback(async () => {
     if (useLocationStore.getState().isTracking) return;
+
+    // Reset route immediately — prevents a stale route from the previous session
+    // showing a false loop-close before the async setup completes.
+    useLocationStore.getState().resetRoute();
 
     if (!isSupabaseConfigured) {
       setPermissionIssue('missing_supabase');
@@ -190,7 +205,22 @@ export function useRealtimeTracking() {
 
     setPermissionIssue('idle');
 
+    const activity = useSessionStore.getState().activity ?? 'walking';
+    const sessionId = useSessionStore.getState().sessionId;
+    if (!sessionId) {
+      useSessionStore.getState().resetSession(activity);
+    }
+    const activeSessionId = useSessionStore.getState().sessionId!;
+
     const sessionStartedAt = new Date().toISOString();
+    await supabase.from('sessions').insert({
+      id: activeSessionId,
+      user_id: uid,
+      activity,
+      started_at: sessionStartedAt,
+    });
+    await addSessionParticipant(activeSessionId, uid);
+
     useLocationStore.getState().setSessionStartedAt(sessionStartedAt);
     useLocationStore.getState().resetRoute();
     const seed = useLocationStore.getState().position;
@@ -202,6 +232,7 @@ export function useRealtimeTracking() {
     useLocationStore.getState().setIsTracking(true);
     uidRef.current = uid;
     await KeepAwake.activateKeepAwakeAsync(KEEP_AWAKE_TAG);
+    await startSessionNotification(activity);
 
     const channel = supabase
       .channel(`locations-realtime-${uid}-${Date.now()}`)
@@ -224,7 +255,7 @@ export function useRealtimeTracking() {
 
     channelRef.current = channel;
 
-    await startLocationWatch(uid);
+    await startLocationWatch(uid, activeSessionId);
   }, [startLocationWatch]);
 
   // ── Foreground return: rebuild route from DB to fill background gaps ─────
@@ -238,12 +269,12 @@ export function useRealtimeTracking() {
 
       const store = useLocationStore.getState();
       const uid   = uidRef.current;
-      if (!store.isTracking || store.isPaused || !uid || !store.sessionStartedAt) return;
+      const sessionId = useSessionStore.getState().sessionId;
+      if (!store.isTracking || store.isPaused || !uid || !sessionId) return;
 
-      // Rebuild route from DB then restart foreground watch for UI responsiveness
       void (async () => {
-        await rebuildRouteFromDB(uid, store.sessionStartedAt!);
-        await startForegroundWatch(uid);
+        await rebuildRouteFromDB(uid, sessionId);
+        await startForegroundWatch(uid, sessionId);
       })();
     };
 
@@ -256,7 +287,8 @@ export function useRealtimeTracking() {
     return () => {
       stopForegroundWatch();
       void stopBackgroundLocationWatch();
-      setBackgroundTrackingUserId(null);
+      setBackgroundTrackingContext(null, null);
+      void stopSessionNotification();
       KeepAwake.deactivateKeepAwake(KEEP_AWAKE_TAG);
       if (channelRef.current) {
         void supabase.removeChannel(channelRef.current);

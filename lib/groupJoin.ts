@@ -6,7 +6,45 @@ export interface GroupLookup {
   invite_code: string;
 }
 
-export async function lookupGroupByCode(code: string): Promise<GroupLookup> {
+export interface GroupJoinPreview extends GroupLookup {
+  memberCount: number;
+  creatorUsername: string | null;
+}
+
+export async function fetchGroupJoinPreview(groupId: string): Promise<GroupJoinPreview> {
+  const { data: group, error } = await supabase
+    .from('groups')
+    .select('id, name, invite_code, created_by')
+    .eq('id', groupId)
+    .single();
+
+  if (error || !group) throw new Error('Group not found.');
+
+  const { count } = await supabase
+    .from('group_members')
+    .select('*', { count: 'exact', head: true })
+    .eq('group_id', groupId);
+
+  let creatorUsername: string | null = null;
+  if (group.created_by) {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('username')
+      .eq('id', group.created_by)
+      .single();
+    creatorUsername = profile?.username ?? null;
+  }
+
+  return {
+    id: group.id,
+    name: group.name,
+    invite_code: group.invite_code,
+    memberCount: count ?? 0,
+    creatorUsername,
+  };
+}
+
+export async function lookupGroupByCode(code: string): Promise<GroupJoinPreview> {
   const normalized = code.trim().toUpperCase();
   if (normalized.length !== 6) {
     throw new Error('Enter a 6-character invite code.');
@@ -19,7 +57,7 @@ export async function lookupGroupByCode(code: string): Promise<GroupLookup> {
     .single();
 
   if (error || !group) throw new Error('No group found with that code.');
-  return group as GroupLookup;
+  return fetchGroupJoinPreview(group.id);
 }
 
 export async function ensureGroupMembershipLimit(userId: string): Promise<void> {

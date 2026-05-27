@@ -54,19 +54,32 @@ const INIT_COORD: [number, number] = [0, 20]; // [lng, lat] — world view
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
+/** True when a stored parcel belongs on the selected activity layer. */
+export function parcelMatchesActivityLayer(
+  parcelActivity: string | null | undefined,
+  layer: string,
+): boolean {
+  const stored = (parcelActivity ?? 'walking').toLowerCase();
+  const selected = layer.toLowerCase();
+  if (selected === 'rollerblading' && (stored === 'rollerblading' || stored === 'skating')) {
+    return true;
+  }
+  return stored === selected;
+}
+
 export interface ParcelMapProps {
   /** Expose the camera ref so a parent can fly to coordinates. */
   cameraRef?: React.RefObject<MapboxGL.Camera>;
   /**
-   * Only render parcels for this activity type.
-   * Undefined = show all activities.
+   * Activity layer: only show parcels claimed with this activity.
+   * Walk shows walks, Run shows runs, etc. Omit to show all.
    */
-  activityFilter?: string;
+  activityLayer?: string;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ParcelMap({ cameraRef: externalCameraRef, activityFilter }: ParcelMapProps) {
+export function ParcelMap({ cameraRef: externalCameraRef, activityLayer }: ParcelMapProps) {
   const insets = useSafeAreaInsets();
 
   const internalCameraRef = useRef<MapboxGL.Camera>(null);
@@ -126,12 +139,12 @@ export function ParcelMap({ cameraRef: externalCameraRef, activityFilter }: Parc
     });
   }, [position?.lat, position?.lng, isTracking, isPaused]);
 
-  // ── GeoJSON: claimed parcels (filtered by activity layer) ─────────────────
+  // ── GeoJSON: parcels for the selected activity layer (all users) ─────────────
   const parcelsGeoJson = useMemo((): GeoJSON.FeatureCollection => ({
     type: 'FeatureCollection',
     features: parcels
-      .filter((p) => p.coordinates?.length >= 3)
-      .filter((p) => !activityFilter || p.activity === activityFilter)
+      .filter((p) => Array.isArray(p.coordinates) && p.coordinates.length >= 3)
+      .filter((p) => !activityLayer || parcelMatchesActivityLayer(p.activity, activityLayer))
       .map((p) => {
         const ring = parcelRingForGeoJson(p.coordinates);
         if (!ring) return null;
@@ -152,7 +165,7 @@ export function ParcelMap({ cameraRef: externalCameraRef, activityFilter }: Parc
         };
       })
       .filter((f): f is NonNullable<typeof f> => f !== null),
-  }), [parcels, activityFilter]);
+  }), [parcels, activityLayer]);
 
   // ── GeoJSON: live route polyline ───────────────────────────────────────────
   const routeGeoJson = useMemo((): GeoJSON.Feature | null => {

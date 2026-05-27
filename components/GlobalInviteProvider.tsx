@@ -30,9 +30,11 @@ import {
   acceptGroupMembership,
   buildGroupJoinDeepLink,
   declineGroupInvite,
+  fetchGroupJoinPreview,
   lookupGroupByCode,
   parseGroupJoinDeepLink,
 } from '@/lib/groupJoin';
+import { notifyPendingGroupJoin } from '@/lib/groupInviteNotify';
 import { supabase } from '@/lib/supabase';
 import {
   useGroupJoinStore,
@@ -55,6 +57,7 @@ export function GlobalInviteProvider() {
 
   const queuePendingJoin = async (pending: PendingGroupJoin) => {
     await setPendingJoin(pending);
+    await notifyPendingGroupJoin(pending.groupName, pending.inviteCode ?? undefined);
   };
 
   const hydrateGroupInvite = async (row: {
@@ -68,13 +71,16 @@ export function GlobalInviteProvider() {
       supabase.from('groups').select('invite_code').eq('id', row.group_id).single(),
     ]);
 
+    const preview = await fetchGroupJoinPreview(row.group_id);
     await queuePendingJoin({
-      groupId:      row.group_id,
-      groupName:    row.group_name,
-      inviteCode:   group?.invite_code ?? '',
-      source:       'username_invite',
-      inviteId:     row.id,
-      fromUsername: profile?.username ?? null,
+      groupId:         row.group_id,
+      groupName:       row.group_name,
+      inviteCode:      preview.invite_code,
+      source:          'username_invite',
+      inviteId:        row.id,
+      fromUsername:    profile?.username ?? null,
+      creatorUsername: preview.creatorUsername,
+      memberCount:     preview.memberCount,
     });
   };
 
@@ -89,10 +95,12 @@ export function GlobalInviteProvider() {
     try {
       const group = await lookupGroupByCode(code);
       await queuePendingJoin({
-        groupId:    group.id,
-        groupName:  group.name,
-        inviteCode: group.invite_code,
-        source:     'deep_link',
+        groupId:         group.id,
+        groupName:       group.name,
+        inviteCode:      group.invite_code,
+        source:          'deep_link',
+        creatorUsername: group.creatorUsername,
+        memberCount:     group.memberCount,
       });
     } catch (e: unknown) {
       Alert.alert('Invalid invite', e instanceof Error ? e.message : 'Could not load group.');
@@ -382,6 +390,22 @@ function PendingGroupJoinSheet({
           {subtitle}
           {'\n\n'}
           <Text style={[s.highlight, { color: '#fff' }]}>{pending.groupName}</Text>
+          {pending.creatorUsername ? (
+            <>
+              {'\n'}
+              <Text style={{ color: 'rgba(255,255,255,0.45)' }}>
+                Created by @{pending.creatorUsername}
+              </Text>
+            </>
+          ) : null}
+          {pending.memberCount != null ? (
+            <>
+              {'\n'}
+              <Text style={{ color: 'rgba(255,255,255,0.45)' }}>
+                {pending.memberCount} member{pending.memberCount === 1 ? '' : 's'}
+              </Text>
+            </>
+          ) : null}
         </Text>
 
         {pending.inviteCode ? (
@@ -430,7 +454,7 @@ function PendingGroupJoinSheet({
             {busy ? (
               <ActivityIndicator color="#0e0e10" size="small" />
             ) : (
-              <Text style={s.btnAcceptTxt}>Join</Text>
+              <Text style={s.btnAcceptTxt}>Confirm</Text>
             )}
           </Pressable>
         </View>

@@ -60,7 +60,14 @@
           "isAndroidForegroundServiceEnabled": true
         }
       ],
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#f5c518"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

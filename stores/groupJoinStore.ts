@@ -13,6 +13,8 @@ export interface PendingGroupJoin {
   source: GroupJoinSource;
   inviteId?: string;
   fromUsername?: string | null;
+  creatorUsername?: string | null;
+  memberCount?: number;
 }
 
 interface GroupJoinState {

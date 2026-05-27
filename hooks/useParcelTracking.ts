@@ -2,17 +2,15 @@
  * useParcelTracking.ts
  *
  * Game-mechanic layer on top of useRealtimeTracking.
- * Handles:
- *  - Loop detection (30 m threshold)
- *  - Parcel claiming (save to Supabase parcels table)
- *  - Loading all parcels from Supabase on mount
- *  - Strava upload after claim or session end
  */
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
+import area from '@turf/area';
 
 import { useRealtimeTracking } from '@/hooks/useRealtimeTracking';
+import { registerSessionStopHandler } from '@/lib/sessionControl';
 import {
+  buildGeoJsonPolygon,
   calculateAreaM2,
   isLoopClosed,
   MIN_PARCEL_POINTS,
@@ -22,24 +20,28 @@ import {
   userParcelColor,
 } from '@/lib/parcelGeometry';
 import { rowToParcel, type ParcelRow } from '@/lib/parcelRow';
+import { fetchSessionParticipantIds } from '@/lib/sessionParticipants';
 import { subscribeParcelInserts } from '@/lib/subscribeParcelInserts';
 import { supabase } from '@/lib/supabase';
 import {
   markStravaUploadForRetry,
   RECONNECT_MSG,
-  retryQueuedStravaUpload,
 } from '@/lib/stravaUploadQueue';
 import { uploadSessionToStrava } from '@/lib/stravaUpload';
 import { useLocationStore } from '@/stores/locationStore';
 import { useParcelStore, type Parcel } from '@/stores/parcelStore';
 import { usePairStore } from '@/stores/pairStore';
+import { useSessionStore, type Activity } from '@/stores/sessionStore';
 import { useStravaStore } from '@/stores/stravaStore';
 
 export type ActivityType = 'walking' | 'running' | 'cycling' | 'rollerblading';
 
 export { rowToParcel } from '@/lib/parcelRow';
 
-// ─── Hook ─────────────────────────────────────────────────────────────────────
+function toSessionActivity(type: ActivityType): Activity {
+  if (type === 'rollerblading') return 'rollerblading';
+  return type;
+}
 
 export function useParcelTracking(activityType: ActivityType = 'walking') {
   const tracking = useRealtimeTracking();
@@ -47,32 +49,34 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
   const route      = useLocationStore((s) => s.route);
   const isTracking = useLocationStore((s) => s.isTracking);
   const isPaused   = useLocationStore((s) => s.isPaused);
+  const hasClaimedParcel = useSessionStore((s) => s.hasClaimedParcel);
+  const sessionId        = useSessionStore((s) => s.sessionId);
 
-  // Keep a snapshot of the route for Strava upload after reset
   const routeSnapshotRef = useRef(route);
   useEffect(() => { routeSnapshotRef.current = route; }, [route]);
 
-  // ── Parcel geometry ────────────────────────────────────────────────────────
-  const loopClosed = useMemo(() => isLoopClosed(route), [route]);
+  const loopClosed = useMemo(
+    () => isLoopClosed(route, { alreadyClaimedThisSession: hasClaimedParcel }),
+    [route, hasClaimedParcel],
+  );
   const distanceM  = useMemo(() => routeLengthMeters(route), [route]);
   const areaM2     = useMemo(() => {
     if (!loopClosed || route.length < MIN_PARCEL_POINTS) return null;
     try { return calculateAreaM2(route); } catch { return null; }
   }, [loopClosed, route]);
 
-  // ── Realtime: pick up new parcels from other users (single global subscription)
   useEffect(() => subscribeParcelInserts(), []);
 
-  // ── Load all parcels on mount ──────────────────────────────────────────────
   const loadParcels = useCallback(async () => {
     useParcelStore.getState().setLoading(true);
     try {
       const { data, error } = await supabase
         .from('parcels')
         .select(`
-          id, owner_id, co_owner_id, coordinates, area_sqm, claimed_at,
+          id, owner_id, co_owner_id, co_owners, group_id, coordinates, area_sqm, claimed_at,
           color, points, activity,
-          profiles ( username, display_name )
+          profiles ( username, display_name ),
+          groups ( name )
         `)
         .not('coordinates', 'is', null)
         .order('claimed_at', { ascending: false })
@@ -91,7 +95,6 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
 
   useEffect(() => { void loadParcels(); }, [loadParcels]);
 
-  // ── Strava upload helper ──────────────────────────────────────────────────
   const uploadToStrava = useCallback(async (
     routeToUpload: typeof route,
     parcelsClaimed: number,
@@ -100,8 +103,6 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     if (!store.isConnected) return;
     if (routeToUpload.length < 2) return;
 
-    // Wait for the initial DB sync to finish (max 4 s) before uploading.
-    // Prevents a race where the upload fires before tokens load on first launch.
     if (!store.syncReady) {
       await new Promise<void>((resolve) => {
         const unsub = useStravaStore.subscribe((s) => {
@@ -111,10 +112,8 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
       });
     }
 
-    // Re-check after waiting — user might not be connected
     if (!useStravaStore.getState().isConnected) return;
 
-    // Persist details so the toast can offer a retry
     useStravaStore.getState().setLastUpload(routeToUpload, activityType, parcelsClaimed);
     useStravaStore.getState().setUploadStatus('uploading');
 
@@ -123,14 +122,12 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     if (result.success) {
       useStravaStore.getState().setUploadQueued(false);
       useStravaStore.getState().setUploadStatus('success');
-      // Auto-dismiss success toast after 4 s
       setTimeout(() => {
         if (useStravaStore.getState().uploadStatus === 'success') {
           useStravaStore.getState().clearUploadStatus();
         }
       }, 4_000);
     } else if (result.notConnected) {
-      // Not connected — silent, nothing to show
       useStravaStore.getState().clearUploadStatus();
     } else if (result.needsReconnect || result.error?.includes('expired')) {
       markStravaUploadForRetry();
@@ -144,38 +141,65 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     }
   }, [activityType]);
 
-  const startTracking = useCallback(async () => {
-    // Each session starts solo — stale partners must not bleed points into the next walk.
-    usePairStore.getState().leaveParty();
-    await tracking.startTracking();
-  }, [tracking]);
+  const stopTracking = useCallback(async () => {
+    const snapshot = [...routeSnapshotRef.current];
+    await tracking.stopTracking();
+    if (snapshot.length >= 2 && routeLengthMeters(snapshot) > 50) {
+      void uploadToStrava(snapshot, 0);
+    }
+  }, [tracking, uploadToStrava]);
 
-  // ── Claim parcel ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    registerSessionStopHandler(stopTracking);
+    return () => registerSessionStopHandler(null);
+  }, [stopTracking]);
+
+  const startTracking = useCallback(async () => {
+    usePairStore.getState().leaveParty();
+    useSessionStore.getState().resetSession(toSessionActivity(activityType));
+    // Explicitly clear route here so hasClaimedParcel=false and route=[] are set
+    // atomically before any async tracking setup begins.
+    useLocationStore.getState().resetRoute();
+    await tracking.startTracking();
+  }, [tracking, activityType]);
+
   const claimParcel = useCallback(async (): Promise<void> => {
     if (!loopClosed) throw new Error('Walk back to your starting point to close the loop.');
     if (route.length < MIN_PARCEL_POINTS) throw new Error('Route too short — keep moving.');
+    if (hasClaimedParcel) throw new Error('You already claimed a parcel this session.');
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) throw new Error('Sign in to claim territory.');
 
     const uid = session.user.id;
+    const activeSessionId = sessionId ?? useSessionStore.getState().sessionId;
+
     const cleanedRoute = prepareClaimRoute(route);
     const coordinates  = routeToLatLngPairs(cleanedRoute);
-    const area_sqm     = calculateAreaM2(cleanedRoute);
+    const area_sqm     = area(buildGeoJsonPolygon(cleanedRoute));
     const color        = userParcelColor(uid);
     const fullPoints   = Math.max(1, Math.round(area_sqm / 50));
 
-    // ── Cooperative claim — only when actively paired this session ───────────
-    const { partners } = usePairStore.getState();
-    const partySize = 1 + partners.length;
+    // Session participants from DB (populated when session starts + when partner
+    // is explicitly added). Also merge local in-memory partners — they may not
+    // have been written to session_participants if the pair was accepted after
+    // the session was already running (pair_requests don't carry the session ID).
+    const dbParticipantIds = activeSessionId
+      ? await fetchSessionParticipantIds(activeSessionId)
+      : [uid];
+    const localPartnerIds = usePairStore.getState().partners.map((p) => p.id);
+
+    const uniqueParticipants = [
+      ...new Set([uid, ...dbParticipantIds, ...localPartnerIds].filter(Boolean)),
+    ];
+    const coOwnerIds = uniqueParticipants.filter((id) => id !== uid);
+    const partySize = uniqueParticipants.length;
     const eachPts   = partySize > 1
       ? Math.max(1, Math.floor(fullPoints / partySize))
       : fullPoints;
-    const coOwnerIds = partners.length > 0 ? partners.map((p) => p.id) : [];
 
-    // Check if all party members share a group
     let sharedGroupId: string | null = null;
-    if (partners.length > 0) {
+    if (coOwnerIds.length > 0) {
       const allIds = [uid, ...coOwnerIds];
       const { data: memberRows } = await supabase
         .from('group_members')
@@ -196,7 +220,8 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
       .from('parcels')
       .insert({
         owner_id:    uid,
-        co_owner_id: coOwnerIds[0] ?? null,   // legacy compat
+        session_id:  activeSessionId,
+        co_owner_id: coOwnerIds[0] ?? null,
         co_owners:   coOwnerIds,
         group_id:    sharedGroupId,
         activity:    activityType,
@@ -217,10 +242,8 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     if (error) throw new Error(error.message);
     if (data) useParcelStore.getState().addParcel(rowToParcel(data as unknown as ParcelRow));
 
-    // Credit all party members equally
-    const allPartyIds = [uid, ...coOwnerIds];
     await Promise.all(
-      allPartyIds.map((pid) =>
+      uniqueParticipants.map((pid) =>
         supabase.rpc('credit_parcel_points', { p_uid: pid, p_points: eachPts })
           .then(({ error: e }) => {
             if (__DEV__ && e) console.warn('[claimParcel] points credit failed for', pid, e.message);
@@ -228,29 +251,24 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
       )
     );
 
-    // Clear pair state after successful claim
+    useSessionStore.getState().setHasClaimedParcel(true);
     usePairStore.getState().clearPairing();
 
-    // Snapshot route before reset, then upload to Strava in background
     const snapshot = [...route];
     useLocationStore.getState().resetRoute();
     void uploadToStrava(snapshot, 1);
-  }, [loopClosed, route, activityType, uploadToStrava]);
+  }, [
+    loopClosed,
+    route,
+    activityType,
+    uploadToStrava,
+    hasClaimedParcel,
+    sessionId,
+  ]);
 
-  // ── Stop tracking — wraps engine stop, uploads session if long enough ─────
-  const stopTracking = useCallback(async () => {
-    const snapshot = [...routeSnapshotRef.current];
-    await tracking.stopTracking();
-    // Only upload if route has meaningful distance (>50 m)
-    if (snapshot.length >= 2 && routeLengthMeters(snapshot) > 50) {
-      void uploadToStrava(snapshot, 0);
-    }
-  }, [tracking, uploadToStrava]);
-
-  // ── Public API ────────────────────────────────────────────────────────────
   return {
     startTracking,
-    stopTracking,                          // wrapped version
+    stopTracking,
     pauseTracking:        tracking.pauseTracking,
     resumeTracking:       tracking.resumeTracking,
     permissionIssue:      tracking.permissionIssue,

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import type { StravaAthlete, StravaTokens } from '@/lib/strava';
+import { isStravaTokenExpired, type StravaAthlete, type StravaTokens } from '@/lib/strava';
 import type { Coord } from '@/stores/locationStore';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -88,11 +88,7 @@ export const useStravaStore = create<StravaState>()((set, get) => ({
 
   setSyncReady: (ready) => set({ syncReady: ready }),
 
-  isTokenExpired: () => {
-    const { expiresAt } = get();
-    if (!expiresAt) return true;
-    return Date.now() / 1000 >= expiresAt - 300; // 5-min buffer
-  },
+  isTokenExpired: () => isStravaTokenExpired(get().expiresAt),
 
   // ── Upload status ──────────────────────────────────────────────────────────
 
