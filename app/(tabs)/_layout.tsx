@@ -19,7 +19,7 @@ export default function TabLayout() {
         <Tabs.Screen name="index" options={{ href: null }} />
         <Tabs.Screen name="map" />
         <Tabs.Screen name="territory" />
-        <Tabs.Screen name="track" options={{ href: null }} />
+        <Tabs.Screen name="track" />
         <Tabs.Screen name="profile" />
         <Tabs.Screen name="leaderboard" />
         <Tabs.Screen name="group" />

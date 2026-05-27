@@ -4,6 +4,7 @@
  * Game-mechanic layer on top of useRealtimeTracking.
  */
 
+import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import area from '@turf/area';
 
@@ -28,10 +29,12 @@ import {
   RECONNECT_MSG,
 } from '@/lib/stravaUploadQueue';
 import { uploadSessionToStrava } from '@/lib/stravaUpload';
-import { useLocationStore } from '@/stores/locationStore';
+import { tierFromAreaKm2 } from '@/lib/tiers';
+import { useLocationStore, type Coord } from '@/stores/locationStore';
 import { useParcelStore, type Parcel } from '@/stores/parcelStore';
 import { usePairStore } from '@/stores/pairStore';
 import { useSessionStore, type Activity } from '@/stores/sessionStore';
+import { useSessionResultStore } from '@/stores/sessionResultStore';
 import { useStravaStore } from '@/stores/stravaStore';
 
 export type ActivityType = 'walking' | 'running' | 'cycling' | 'rollerblading';
@@ -54,6 +57,15 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
 
   const routeSnapshotRef = useRef(route);
   useEffect(() => { routeSnapshotRef.current = route; }, [route]);
+
+  // Captured inside claimParcel before resetRoute() is called — lets stopTracking
+  // show the pre-claim loop on the recap map even though the route was cleared.
+  const claimRouteSnapshotRef  = useRef<Coord[]>([]);
+  const claimColorRef          = useRef<string>('');
+  const claimPointsRef         = useRef<number>(0);
+  const claimAreaM2Ref         = useRef<number | null>(null);
+  const claimCoordsRef         = useRef<[number, number][] | null>(null);
+  const claimCoOwnersRef       = useRef<string[]>([]);
 
   const loopClosed = useMemo(
     () => isLoopClosed(route, { alreadyClaimedThisSession: hasClaimedParcel }),
@@ -143,11 +155,46 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
 
   const stopTracking = useCallback(async () => {
     const snapshot = [...routeSnapshotRef.current];
+
+    // If a parcel was claimed this session, use the pre-claim route snapshot
+    // (claimRouteSnapshotRef) — the live route was reset to [] after claiming.
+    const claimed       = useSessionStore.getState().hasClaimedParcel;
+    const displayRoute  = claimed && claimRouteSnapshotRef.current.length > 0
+      ? claimRouteSnapshotRef.current
+      : snapshot;
+
+    const sessionState  = useSessionStore.getState();
+    const stravaState   = useStravaStore.getState();
+
+    const parcelAreaM2  = claimAreaM2Ref.current;
+    const areaKm2       = parcelAreaM2 != null ? parcelAreaM2 / 1_000_000 : null;
+
+    useSessionResultStore.getState().setResult({
+      route:        displayRoute,
+      activityType: activityType,
+      startedAt:    sessionState.startedAt,
+      endedAt:      Date.now(),
+      distanceM:    routeLengthMeters(displayRoute),
+      claimedParcel: claimed,
+      parcelAreaM2,
+      parcelPoints:  claimPointsRef.current,
+      parcelColor:   claimColorRef.current,
+      parcelTier:    areaKm2 != null ? tierFromAreaKm2(areaKm2) : null,
+      coOwners:      claimCoOwnersRef.current,
+      parcelCoords:  claimCoordsRef.current,
+      stravaConnected:   stravaState.isConnected,
+      stravaUploadStatus: stravaState.uploadStatus,
+    });
+
     await tracking.stopTracking();
+
+    // Upload to Strava using the full route (not the shorter display route).
     if (snapshot.length >= 2 && routeLengthMeters(snapshot) > 50) {
-      void uploadToStrava(snapshot, 0);
+      void uploadToStrava(snapshot, claimed ? 1 : 0);
     }
-  }, [tracking, uploadToStrava]);
+
+    router.replace('/tracking/session-end');
+  }, [tracking, uploadToStrava, activityType]);
 
   useEffect(() => {
     registerSessionStopHandler(stopTracking);
@@ -252,6 +299,18 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     );
 
     useSessionStore.getState().setHasClaimedParcel(true);
+
+    // Capture claim data for the recap screen BEFORE clearing pairing / route.
+    const claimedPartners = usePairStore.getState().partners;
+    claimCoOwnersRef.current = claimedPartners
+      .filter((p) => coOwnerIds.includes(p.id))
+      .map((p) => p.username ?? p.id);
+    claimColorRef.current   = color;
+    claimPointsRef.current  = eachPts;
+    claimAreaM2Ref.current  = area_sqm;
+    claimCoordsRef.current  = coordinates as [number, number][];
+    claimRouteSnapshotRef.current = [...route];
+
     usePairStore.getState().clearPairing();
 
     const snapshot = [...route];

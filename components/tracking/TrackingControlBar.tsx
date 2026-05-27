@@ -1,14 +1,14 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { router } from 'expo-router';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 
 import { TRACKING } from '@/constants/trackingTheme';
 
 type Props = {
   onPause?: () => void;
+  onStop?: () => void;
 };
 
-export function TrackingControlBar({ onPause }: Props) {
+export function TrackingControlBar({ onPause, onStop }: Props) {
   return (
     <View
       style={{
@@ -56,7 +56,7 @@ export function TrackingControlBar({ onPause }: Props) {
       </Pressable>
 
       <Pressable
-        onPress={() => router.push('/tracking/session-end')}
+        onPress={onStop}
         style={{
           width: 48,
           height: 48,

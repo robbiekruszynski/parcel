@@ -5,11 +5,12 @@ import { Animated, PanResponder, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const NAV_ITEMS = [
-  { name: 'map',         icon: 'map'    as const, label: 'Map'      },
-  { name: 'territory',   icon: 'flag'   as const, label: 'Territory'},
-  { name: 'profile',     icon: 'user'   as const, label: 'Profile'  },
-  { name: 'leaderboard', icon: 'trophy' as const, label: 'Rankings' },
-  { name: 'group',       icon: 'users'  as const, label: 'Group'    },
+  { name: 'map',         icon: 'map'     as const, label: 'Map'      },
+  { name: 'territory',   icon: 'flag'    as const, label: 'Territory'},
+  { name: 'track',       icon: 'history' as const, label: 'History'  },
+  { name: 'profile',     icon: 'user'    as const, label: 'Profile'  },
+  { name: 'leaderboard', icon: 'trophy'  as const, label: 'Rankings' },
+  { name: 'group',       icon: 'users'   as const, label: 'Group'    },
 ];
 
 const CONTENT_H = 90;
