@@ -1,6 +1,7 @@
 import type { StravaTokens } from '@/lib/strava';
 import { runStravaCodeOnce } from '@/lib/exchangeStravaCodeOnce';
 import { readSupabaseFunctionError } from '@/lib/stravaErrors';
+import { retryQueuedStravaUpload } from '@/lib/stravaUploadQueue';
 import { supabase } from '@/lib/supabase';
 import { useStravaStore } from '@/stores/stravaStore';
 
@@ -40,6 +41,7 @@ export async function completeStravaSignIn(code: string, redirectUri: string): P
 
     if (payload.strava?.access_token && session?.user?.id) {
       useStravaStore.getState().setStravaTokens(payload.strava, session.user.id);
+      await retryQueuedStravaUpload();
     }
   });
 }

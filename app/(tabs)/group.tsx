@@ -30,7 +30,9 @@ import {
 } from 'react-native';
 
 import { PlayerProfileSheet } from '@/components/PlayerProfileSheet';
+import { buildGroupJoinDeepLink, lookupGroupByCode } from '@/lib/groupJoin';
 import { supabase } from '@/lib/supabase';
+import { useGroupJoinStore } from '@/stores/groupJoinStore';
 
 if (Platform.OS === 'android') {
   const { UIManager } = require('react-native');
@@ -372,21 +374,7 @@ export default function GroupScreen() {
     if (!code || !myUserId) return;
     setBusy(true);
     try {
-      // Check group limit first
-      const { count } = await supabase
-        .from('group_members')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', myUserId);
-      if ((count ?? 0) >= 3) {
-        throw new Error('You can be in up to 3 groups at a time. Leave a group first.');
-      }
-
-      const { data: group, error } = await supabase
-        .from('groups')
-        .select('id, name')
-        .eq('invite_code', code)
-        .single();
-      if (error || !group) throw new Error('No group found with that code');
+      const group = await lookupGroupByCode(code);
 
       const { data: existing } = await supabase
         .from('group_members')
@@ -396,14 +384,15 @@ export default function GroupScreen() {
         .maybeSingle();
       if (existing) throw new Error("You're already in this group");
 
-      await supabase
-        .from('group_members')
-        .insert({ group_id: group.id, user_id: myUserId, role: 'member' });
+      await useGroupJoinStore.getState().setPending({
+        groupId:    group.id,
+        groupName:  group.name,
+        inviteCode: group.invite_code,
+        source:     'code',
+      });
 
       setJoinCode('');
       setJoinVisible(false);
-      await load();
-      Alert.alert('Joined!', `Welcome to ${group.name}! 🎉`);
     } catch (e: unknown) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Could not join group');
     } finally {
@@ -457,8 +446,12 @@ export default function GroupScreen() {
           {
             text: 'Share',
             onPress: () => {
+              const link = buildGroupJoinDeepLink(invite_code);
               void Share.share({
-                message: `Join my group "${name}" on Parcel! Invite code: ${invite_code}`,
+                message:
+                  `Join my group "${name}" on Parcel!\n` +
+                  `Invite code: ${invite_code}\n` +
+                  `Open: ${link}`,
               });
             },
           },
@@ -595,8 +588,12 @@ export default function GroupScreen() {
   };
 
   const handleShareCode = (code: string, groupName: string) => {
+    const link = buildGroupJoinDeepLink(code);
     void Share.share({
-      message: `Join my group "${groupName}" on Parcel! Invite code: ${code}`,
+      message:
+        `Join my group "${groupName}" on Parcel!\n` +
+        `Invite code: ${code}\n` +
+        `Open: ${link}`,
     });
   };
 

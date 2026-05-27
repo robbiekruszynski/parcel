@@ -16,6 +16,7 @@ import {
   calculateAreaM2,
   isLoopClosed,
   MIN_PARCEL_POINTS,
+  prepareClaimRoute,
   routeLengthMeters,
   routeToLatLngPairs,
   userParcelColor,
@@ -23,6 +24,11 @@ import {
 import { rowToParcel, type ParcelRow } from '@/lib/parcelRow';
 import { subscribeParcelInserts } from '@/lib/subscribeParcelInserts';
 import { supabase } from '@/lib/supabase';
+import {
+  markStravaUploadForRetry,
+  RECONNECT_MSG,
+  retryQueuedStravaUpload,
+} from '@/lib/stravaUploadQueue';
 import { uploadSessionToStrava } from '@/lib/stravaUpload';
 import { useLocationStore } from '@/stores/locationStore';
 import { useParcelStore, type Parcel } from '@/stores/parcelStore';
@@ -115,6 +121,7 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     const result = await uploadSessionToStrava(routeToUpload, activityType, parcelsClaimed);
 
     if (result.success) {
+      useStravaStore.getState().setUploadQueued(false);
       useStravaStore.getState().setUploadStatus('success');
       // Auto-dismiss success toast after 4 s
       setTimeout(() => {
@@ -125,18 +132,23 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     } else if (result.notConnected) {
       // Not connected — silent, nothing to show
       useStravaStore.getState().clearUploadStatus();
-    } else if (result.needsReconnect) {
-      useStravaStore.getState().setUploadStatus(
-        'failed',
-        'Strava needs reconnecting — go to Profile → Account & Settings.',
-      );
+    } else if (result.needsReconnect || result.error?.includes('expired')) {
+      markStravaUploadForRetry();
+      useStravaStore.getState().setUploadStatus('failed', RECONNECT_MSG);
     } else {
+      markStravaUploadForRetry();
       useStravaStore.getState().setUploadStatus(
         'failed',
         result.error ?? 'Upload to Strava failed.',
       );
     }
   }, [activityType]);
+
+  const startTracking = useCallback(async () => {
+    // Each session starts solo — stale partners must not bleed points into the next walk.
+    usePairStore.getState().leaveParty();
+    await tracking.startTracking();
+  }, [tracking]);
 
   // ── Claim parcel ──────────────────────────────────────────────────────────
   const claimParcel = useCallback(async (): Promise<void> => {
@@ -146,17 +158,20 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) throw new Error('Sign in to claim territory.');
 
-    const uid          = session.user.id;
-    const coordinates  = routeToLatLngPairs(route);
-    const area_sqm     = calculateAreaM2(route);
+    const uid = session.user.id;
+    const cleanedRoute = prepareClaimRoute(route);
+    const coordinates  = routeToLatLngPairs(cleanedRoute);
+    const area_sqm     = calculateAreaM2(cleanedRoute);
     const color        = userParcelColor(uid);
     const fullPoints   = Math.max(1, Math.round(area_sqm / 50));
 
-    // ── Cooperative claim (N-way split) ──────────────────────────────────
+    // ── Cooperative claim — only when actively paired this session ───────────
     const { partners } = usePairStore.getState();
-    const partySize = 1 + partners.length;             // owner + all partners
-    const eachPts   = Math.max(1, Math.floor(fullPoints / partySize));
-    const coOwnerIds = partners.map((p) => p.id);
+    const partySize = 1 + partners.length;
+    const eachPts   = partySize > 1
+      ? Math.max(1, Math.floor(fullPoints / partySize))
+      : fullPoints;
+    const coOwnerIds = partners.length > 0 ? partners.map((p) => p.id) : [];
 
     // Check if all party members share a group
     let sharedGroupId: string | null = null;
@@ -234,7 +249,7 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
 
   // ── Public API ────────────────────────────────────────────────────────────
   return {
-    startTracking:        tracking.startTracking,
+    startTracking,
     stopTracking,                          // wrapped version
     pauseTracking:        tracking.pauseTracking,
     resumeTracking:       tracking.resumeTracking,

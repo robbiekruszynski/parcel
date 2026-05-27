@@ -34,7 +34,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { formatAreaM2 } from '@/lib/parcelGeometry';
+import { formatAreaM2, parcelRingForGeoJson } from '@/lib/parcelGeometry';
 import { useLocationStore } from '@/stores/locationStore';
 import { useParcelStore, type Parcel } from '@/stores/parcelStore';
 
@@ -132,27 +132,26 @@ export function ParcelMap({ cameraRef: externalCameraRef, activityFilter }: Parc
     features: parcels
       .filter((p) => p.coordinates?.length >= 3)
       .filter((p) => !activityFilter || p.activity === activityFilter)
-      .map((p) => ({
-        type: 'Feature',
-        id: p.id,
-        geometry: {
-          type: 'Polygon',
-          // Supabase stores [lat, lng] — GeoJSON needs [lng, lat]
-          coordinates: [
-            [
-              ...p.coordinates.map(([lat, lng]) => [lng, lat]),
-              [p.coordinates[0][1], p.coordinates[0][0]], // close ring
-            ],
-          ],
-        },
-        properties: {
-          id:            p.id,
-          color:         p.color,
-          username:      p.owner_username ? `@${p.owner_username}` : '',
-          groupName:     p.group_name ?? '',
-          coOwnersCount: p.co_owners?.length ?? 0,
-        },
-      })),
+      .map((p) => {
+        const ring = parcelRingForGeoJson(p.coordinates);
+        if (!ring) return null;
+        return {
+          type: 'Feature' as const,
+          id: p.id,
+          geometry: {
+            type: 'Polygon' as const,
+            coordinates: [ring],
+          },
+          properties: {
+            id:            p.id,
+            color:         p.color,
+            username:      p.owner_username ? `@${p.owner_username}` : '',
+            groupName:     p.group_name ?? '',
+            coOwnersCount: p.co_owners?.length ?? 0,
+          },
+        };
+      })
+      .filter((f): f is NonNullable<typeof f> => f !== null),
   }), [parcels, activityFilter]);
 
   // ── GeoJSON: live route polyline ───────────────────────────────────────────

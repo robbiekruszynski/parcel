@@ -4,6 +4,7 @@ import { useCallback, useMemo } from 'react';
 
 import { runStravaCodeOnce } from '@/lib/exchangeStravaCodeOnce';
 import { readSupabaseFunctionError } from '@/lib/stravaErrors';
+import { retryQueuedStravaUpload } from '@/lib/stravaUploadQueue';
 import {
   buildStravaAuthorizeUrl,
   buildStravaRedirectUri,
@@ -41,6 +42,7 @@ export function useStravaAuth() {
         }
         if (!data?.access_token) throw new Error('Token exchange returned no access token');
         setStravaTokens(data, session.user.id);
+        await retryQueuedStravaUpload();
       });
     },
     [stravaRedirectUri, setStravaTokens]

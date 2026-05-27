@@ -27,6 +27,8 @@ interface StravaState {
   lastRoute: Coord[] | null;
   lastActivityType: string | null;
   lastParcelsClaimed: number;
+  /** True when an upload failed and should auto-retry after Strava reconnect. */
+  uploadQueued: boolean;
 
   // ── Actions ────────────────────────────────────────────────────────────────
   setStravaTokens: (tokens: StravaTokens, userId: string) => void;
@@ -35,6 +37,7 @@ interface StravaState {
   isTokenExpired: () => boolean;
   setUploadStatus: (status: StravaUploadStatus, error?: string) => void;
   setLastUpload: (route: Coord[], activityType: string, parcelsClaimed: number) => void;
+  setUploadQueued: (queued: boolean) => void;
   clearUploadStatus: () => void;
 }
 
@@ -54,6 +57,7 @@ export const useStravaStore = create<StravaState>()((set, get) => ({
   lastRoute:         null,
   lastActivityType:  null,
   lastParcelsClaimed: 0,
+  uploadQueued:      false,
 
   // ── Auth ───────────────────────────────────────────────────────────────────
 
@@ -79,6 +83,7 @@ export const useStravaStore = create<StravaState>()((set, get) => ({
       syncReady:    true,
       uploadStatus: 'idle',
       uploadError:  null,
+      uploadQueued: false,
     }),
 
   setSyncReady: (ready) => set({ syncReady: ready }),
@@ -96,6 +101,8 @@ export const useStravaStore = create<StravaState>()((set, get) => ({
 
   setLastUpload: (route, activityType, parcelsClaimed) =>
     set({ lastRoute: route, lastActivityType: activityType, lastParcelsClaimed: parcelsClaimed }),
+
+  setUploadQueued: (uploadQueued) => set({ uploadQueued }),
 
   clearUploadStatus: () =>
     set({ uploadStatus: 'idle', uploadError: null }),

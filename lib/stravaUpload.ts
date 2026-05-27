@@ -45,6 +45,7 @@ async function refreshAccessToken(): Promise<
       ok: false,
       result: {
         success: false,
+        needsReconnect: true,
         error: 'Strava session expired — reconnect Strava in Settings.',
       },
     };
@@ -77,7 +78,10 @@ async function refreshAccessToken(): Promise<
     return { ok: true, accessToken: fresh.access_token };
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Token refresh failed';
-    return { ok: false, result: { success: false, error: msg } };
+    return {
+      ok: false,
+      result: { success: false, needsReconnect: true, error: msg },
+    };
   }
 }
 

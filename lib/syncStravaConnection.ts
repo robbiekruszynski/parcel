@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { retryQueuedStravaUpload } from '@/lib/stravaUploadQueue';
 import { useStravaStore } from '@/stores/stravaStore';
 
 /** Normalize DB values (bigint seconds, ISO strings, ms) to unix seconds. */
@@ -60,4 +61,6 @@ export async function syncStravaConnectionForUser(userId: string | null): Promis
     },
     userId
   );
+
+  await retryQueuedStravaUpload();
 }

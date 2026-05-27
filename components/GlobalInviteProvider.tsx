@@ -3,19 +3,21 @@
  *
  * Mounted ONCE at the root layout level (inside AuthProvider).
  *
- * Subscribes to two real-time channels:
+ * Subscribes to:
  *  1. pair_requests  — INSERT where to_user_id = me
  *  2. group_invites  — INSERT where to_user_id = me
- *
- * Shows bottom-sheet modals for accept / decline.
+ *  3. Deep links     — parcel://join?code=XXXXXX
+ *  4. Persisted pending group joins (AsyncStorage) — survives backgrounding
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Clipboard from 'expo-clipboard';
+import * as Linking from 'expo-linking';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Modal,
   Pressable,
   Share,
@@ -24,18 +26,19 @@ import {
   View,
 } from 'react-native';
 
+import {
+  acceptGroupMembership,
+  buildGroupJoinDeepLink,
+  declineGroupInvite,
+  lookupGroupByCode,
+  parseGroupJoinDeepLink,
+} from '@/lib/groupJoin';
 import { supabase } from '@/lib/supabase';
+import {
+  useGroupJoinStore,
+  type PendingGroupJoin,
+} from '@/stores/groupJoinStore';
 import { usePairStore } from '@/stores/pairStore';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface IncomingGroupInvite {
-  id: string;
-  groupId: string;
-  groupName: string;
-  fromUsername: string | null;
-  inviteCode: string | null;
-}
 
 // ─── Provider ────────────────────────────────────────────────────────────────
 
@@ -43,8 +46,16 @@ export function GlobalInviteProvider() {
   const myUserIdRef = useRef<string | null>(null);
 
   const incomingPair  = usePairStore((s) => s.incomingRequest);
-  const [groupInvite, setGroupInvite] = useState<IncomingGroupInvite | null>(null);
+  const pendingJoin   = useGroupJoinStore((s) => s.pending);
+  const hydrateJoin   = useGroupJoinStore((s) => s.hydrate);
+  const setPendingJoin = useGroupJoinStore((s) => s.setPending);
+
   const [pairBusy, setPairBusy] = useState(false);
+  const [joinBusy, setJoinBusy] = useState(false);
+
+  const queuePendingJoin = async (pending: PendingGroupJoin) => {
+    await setPendingJoin(pending);
+  };
 
   const hydrateGroupInvite = async (row: {
     id: string;
@@ -57,13 +68,35 @@ export function GlobalInviteProvider() {
       supabase.from('groups').select('invite_code').eq('id', row.group_id).single(),
     ]);
 
-    setGroupInvite({
-      id:           row.id,
+    await queuePendingJoin({
       groupId:      row.group_id,
       groupName:    row.group_name,
+      inviteCode:   group?.invite_code ?? '',
+      source:       'username_invite',
+      inviteId:     row.id,
       fromUsername: profile?.username ?? null,
-      inviteCode:   group?.invite_code ?? null,
     });
+  };
+
+  const handleJoinUrl = async (url: string | null) => {
+    if (!url) return;
+    const code = parseGroupJoinDeepLink(url);
+    if (!code) return;
+
+    const uid = myUserIdRef.current;
+    if (!uid) return;
+
+    try {
+      const group = await lookupGroupByCode(code);
+      await queuePendingJoin({
+        groupId:    group.id,
+        groupName:  group.name,
+        inviteCode: group.invite_code,
+        source:     'deep_link',
+      });
+    } catch (e: unknown) {
+      Alert.alert('Invalid invite', e instanceof Error ? e.message : 'Could not load group.');
+    }
   };
 
   // ── Load current user ID once ─────────────────────────────────────────────
@@ -76,6 +109,25 @@ export function GlobalInviteProvider() {
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  // ── Persisted pending join + cold-start deep link ─────────────────────────
+  useEffect(() => {
+    void hydrateJoin();
+    void Linking.getInitialURL().then((url) => void handleJoinUrl(url));
+
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      void handleJoinUrl(url);
+    });
+
+    const appSub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void hydrateJoin();
+    });
+
+    return () => {
+      sub.remove();
+      appSub.remove();
+    };
+  }, [hydrateJoin]);
 
   // ── Load pending group invites on mount (cold start) ─────────────────────
   useEffect(() => {
@@ -198,9 +250,31 @@ export function GlobalInviteProvider() {
     usePairStore.getState().setIncomingRequest(null);
   };
 
-  // ── Group invite — dismiss (user joins via Groups → Join tab) ────────────
-  const dismissGroupInvite = () => {
-    setGroupInvite(null);
+  // ── Group join — accept / decline ─────────────────────────────────────────
+
+  const acceptGroupJoin = async () => {
+    if (!pendingJoin) return;
+    const uid = myUserIdRef.current;
+    if (!uid) return;
+
+    setJoinBusy(true);
+    try {
+      await acceptGroupMembership(uid, pendingJoin.groupId, pendingJoin.inviteId);
+      await setPendingJoin(null);
+      Alert.alert('Joined!', `Welcome to ${pendingJoin.groupName}!`);
+    } catch (e: unknown) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not join group');
+    } finally {
+      setJoinBusy(false);
+    }
+  };
+
+  const declineGroupJoin = async () => {
+    if (!pendingJoin) return;
+    if (pendingJoin.inviteId) {
+      await declineGroupInvite(pendingJoin.inviteId);
+    }
+    await setPendingJoin(null);
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -232,18 +306,18 @@ export function GlobalInviteProvider() {
         ) : null}
       </Modal>
 
-      {/* ── Incoming group invite ── */}
+      {/* ── Pending group join (passcode, deep link, or username invite) ── */}
       <Modal
-        visible={groupInvite !== null}
+        visible={pendingJoin !== null}
         transparent
         animationType="slide"
-        onRequestClose={dismissGroupInvite}>
-        {groupInvite ? (
-          <GroupInviteSheet
-            groupName={groupInvite.groupName}
-            fromUsername={groupInvite.fromUsername}
-            inviteCode={groupInvite.inviteCode}
-            onDismiss={dismissGroupInvite}
+        onRequestClose={() => void declineGroupJoin()}>
+        {pendingJoin ? (
+          <PendingGroupJoinSheet
+            pending={pendingJoin}
+            busy={joinBusy}
+            onAccept={() => void acceptGroupJoin()}
+            onDecline={() => void declineGroupJoin()}
           />
         ) : null}
       </Modal>
@@ -251,34 +325,45 @@ export function GlobalInviteProvider() {
   );
 }
 
-// ─── Group invite sheet — shows code prominently, user copies it then joins ───
+// ─── Pending group join confirmation ──────────────────────────────────────────
 
-function GroupInviteSheet({
-  groupName,
-  fromUsername,
-  inviteCode,
-  onDismiss,
+function PendingGroupJoinSheet({
+  pending,
+  busy,
+  onAccept,
+  onDecline,
 }: {
-  groupName: string;
-  fromUsername: string | null;
-  inviteCode: string | null;
-  onDismiss: () => void;
+  pending: PendingGroupJoin;
+  busy: boolean;
+  onAccept: () => void;
+  onDecline: () => void;
 }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
-    if (!inviteCode) return;
-    await Clipboard.setStringAsync(inviteCode);
+    if (!pending.inviteCode) return;
+    await Clipboard.setStringAsync(pending.inviteCode);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
   };
 
   const handleShare = () => {
-    if (!inviteCode) return;
+    if (!pending.inviteCode) return;
+    const link = buildGroupJoinDeepLink(pending.inviteCode);
     void Share.share({
-      message: `Join "${groupName}" on Parcel! Invite code: ${inviteCode}`,
+      message:
+        `Join "${pending.groupName}" on Parcel!\n` +
+        `Code: ${pending.inviteCode}\n` +
+        `Open: ${link}`,
     });
   };
+
+  const subtitle =
+    pending.source === 'username_invite' && pending.fromUsername
+      ? `@${pending.fromUsername} invited you to join this group.`
+      : pending.source === 'deep_link'
+        ? 'You opened a group invite link.'
+        : 'You entered a group invite code.';
 
   return (
     <View style={s.backdrop}>
@@ -292,20 +377,17 @@ function GroupInviteSheet({
           style={{ alignSelf: 'center', marginBottom: 14 }}
         />
 
-        <Text style={s.title}>Group Invite</Text>
+        <Text style={s.title}>Join Group?</Text>
         <Text style={s.body}>
-          <Text style={[s.highlight, { color: '#a78bfa' }]}>
-            @{fromUsername ?? 'someone'}
-          </Text>
-          {` invited you to join `}
-          <Text style={[s.highlight, { color: '#fff' }]}>{groupName}</Text>
+          {subtitle}
+          {'\n\n'}
+          <Text style={[s.highlight, { color: '#fff' }]}>{pending.groupName}</Text>
         </Text>
 
-        {/* Code display */}
-        {inviteCode ? (
+        {pending.inviteCode ? (
           <View style={s.codeBox}>
-            <Text style={s.codeLabel}>YOUR INVITE CODE</Text>
-            <Text style={s.codeValue}>{inviteCode}</Text>
+            <Text style={s.codeLabel}>INVITE CODE</Text>
+            <Text style={s.codeValue}>{pending.inviteCode}</Text>
             <View style={s.codeActions}>
               <Pressable
                 style={[s.copyBtn, copied && s.copyBtnSuccess]}
@@ -317,24 +399,41 @@ function GroupInviteSheet({
                   style={{ marginRight: 6 }}
                 />
                 <Text style={[s.copyBtnTxt, copied && { color: '#0e0e10' }]}>
-                  {copied ? 'Copied!' : 'Copy Code'}
+                  {copied ? 'Copied!' : 'Copy'}
                 </Text>
               </Pressable>
               <Pressable style={s.shareBtn} onPress={handleShare}>
-                <MaterialCommunityIcons name="share-variant" size={14} color="rgba(255,255,255,0.5)" style={{ marginRight: 6 }} />
+                <MaterialCommunityIcons
+                  name="share-variant"
+                  size={14}
+                  color="rgba(255,255,255,0.5)"
+                  style={{ marginRight: 6 }}
+                />
                 <Text style={s.shareBtnTxt}>Share</Text>
               </Pressable>
             </View>
           </View>
         ) : null}
 
-        <Text style={s.joinHint}>
-          Go to <Text style={{ color: '#fff', fontWeight: '700' }}>Groups → Join</Text> and enter this code
-        </Text>
+        <View style={s.btnRow}>
+          <Pressable
+            style={[s.btn, s.btnDecline]}
+            onPress={onDecline}
+            disabled={busy}>
+            <Text style={s.btnDeclineTxt}>Decline</Text>
+          </Pressable>
 
-        <Pressable style={[s.btn, s.btnDismiss]} onPress={onDismiss}>
-          <Text style={s.btnDismissTxt}>Got it</Text>
-        </Pressable>
+          <Pressable
+            style={[s.btn, { backgroundColor: '#a78bfa' }, busy && { opacity: 0.6 }]}
+            onPress={onAccept}
+            disabled={busy}>
+            {busy ? (
+              <ActivityIndicator color="#0e0e10" size="small" />
+            ) : (
+              <Text style={s.btnAcceptTxt}>Join</Text>
+            )}
+          </Pressable>
+        </View>
       </View>
     </View>
   );
@@ -461,7 +560,6 @@ const s = StyleSheet.create({
     fontFamily: 'Rajdhani_600SemiBold',
     fontWeight: '700',
   },
-  // Code display box
   codeBox: {
     backgroundColor: 'rgba(167,139,250,0.08)',
     borderWidth: 1,
@@ -470,7 +568,7 @@ const s = StyleSheet.create({
     paddingVertical: 20,
     paddingHorizontal: 20,
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 20,
   },
   codeLabel: {
     fontFamily: 'Rajdhani_600SemiBold',
@@ -525,14 +623,6 @@ const s = StyleSheet.create({
     fontSize: 13,
     color: 'rgba(255,255,255,0.5)',
   },
-  joinHint: {
-    fontFamily: 'Rajdhani_600SemiBold',
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.35)',
-    textAlign: 'center',
-    marginBottom: 20,
-    lineHeight: 19,
-  },
   btnRow: {
     flexDirection: 'row',
     gap: 12,
@@ -549,20 +639,10 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
   },
-  btnDismiss: {
-    backgroundColor: '#a78bfa',
-  },
   btnDeclineTxt: {
     fontFamily: 'Rajdhani_600SemiBold',
     fontSize: 15,
     color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 0.5,
-  },
-  btnDismissTxt: {
-    fontFamily: 'Rajdhani_600SemiBold',
-    fontSize: 15,
-    color: '#0e0e10',
-    fontWeight: '700',
     letterSpacing: 0.5,
   },
   btnAcceptTxt: {

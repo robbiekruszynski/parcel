@@ -13,13 +13,13 @@
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { router } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { uploadSessionToStrava } from '@/lib/stravaUpload';
+import { RECONNECT_MSG, retryQueuedStravaUpload } from '@/lib/stravaUploadQueue';
 import { useStravaStore, type StravaUploadStatus } from '@/stores/stravaStore';
-import type { ActivityType } from '@/hooks/useParcelTracking';
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -29,10 +29,12 @@ export function StravaUploadToast() {
   const status      = useStravaStore((s) => s.uploadStatus);
   const error       = useStravaStore((s) => s.uploadError);
   const isConnected = useStravaStore((s) => s.isConnected);
+  const uploadQueued = useStravaStore((s) => s.uploadQueued);
 
   const slideY  = useRef(new Animated.Value(-120)).current;
   const opacity = useRef(new Animated.Value(0)).current;
-  const visible = status !== 'idle' && isConnected;
+  const visible =
+    status !== 'idle' && (isConnected || uploadQueued);
 
   // Slide in when visible, slide out when idle
   useEffect(() => {
@@ -70,29 +72,14 @@ export function StravaUploadToast() {
   const handleRetry = async () => {
     const store = useStravaStore.getState();
     if (!store.lastRoute || !store.lastActivityType) return;
-
-    store.setUploadStatus('uploading');
-    const result = await uploadSessionToStrava(
-      store.lastRoute,
-      store.lastActivityType as ActivityType,
-      store.lastParcelsClaimed,
-    );
-
-    if (result.success) {
-      store.setUploadStatus('success');
-      setTimeout(() => {
-        if (useStravaStore.getState().uploadStatus === 'success') {
-          store.clearUploadStatus();
-        }
-      }, 4_000);
-    } else if (result.needsReconnect) {
-      store.setUploadStatus('failed', 'Strava needs reconnecting — go to Profile → Account & Settings.');
-    } else {
-      store.setUploadStatus('failed', result.error ?? 'Upload to Strava failed.');
-    }
+    await retryQueuedStravaUpload();
   };
 
-  if (!isConnected) return null;
+  const handleOpenSettings = () => {
+    router.push('/settings');
+  };
+
+  if (!isConnected && !uploadQueued) return null;
 
   return (
     <Animated.View
@@ -104,8 +91,9 @@ export function StravaUploadToast() {
       ]}>
       <ToastContent
         status={status}
-        error={error}
+        error={error ?? (uploadQueued ? RECONNECT_MSG : null)}
         onRetry={() => void handleRetry()}
+        onOpenSettings={handleOpenSettings}
         onDismiss={() => useStravaStore.getState().clearUploadStatus()}
       />
     </Animated.View>
@@ -118,11 +106,13 @@ function ToastContent({
   status,
   error,
   onRetry,
+  onOpenSettings,
   onDismiss,
 }: {
   status: StravaUploadStatus;
   error: string | null;
   onRetry: () => void;
+  onOpenSettings: () => void;
   onDismiss: () => void;
 }) {
   if (status === 'idle') return null;
@@ -154,9 +144,16 @@ function ToastContent({
 
       {/* Actions */}
       {status === 'failed' && (
-        <Pressable style={styles.retryBtn} onPress={onRetry}>
-          <Text style={styles.retryTxt}>Retry</Text>
-        </Pressable>
+        <>
+          <Pressable style={styles.retryBtn} onPress={onRetry}>
+            <Text style={styles.retryTxt}>Retry</Text>
+          </Pressable>
+          {error?.includes('reconnect') || error?.includes('Settings') ? (
+            <Pressable style={styles.settingsBtn} onPress={onOpenSettings}>
+              <Text style={styles.settingsTxt}>Settings</Text>
+            </Pressable>
+          ) : null}
+        </>
       )}
       {(status === 'failed' || status === 'success') && (
         <Pressable style={styles.dismissBtn} onPress={onDismiss} hitSlop={8}>
@@ -259,6 +256,20 @@ const styles = StyleSheet.create({
     fontFamily:    'Rajdhani_600SemiBold',
     fontSize:      12,
     color:         '#f87171',
+    letterSpacing: 0.5,
+  },
+  settingsBtn: {
+    paddingHorizontal: 10,
+    paddingVertical:    5,
+    borderRadius:       8,
+    backgroundColor:    'rgba(245,197,24,0.12)',
+    borderWidth:        1,
+    borderColor:        'rgba(245,197,24,0.3)',
+  },
+  settingsTxt: {
+    fontFamily:    'Rajdhani_600SemiBold',
+    fontSize:      12,
+    color:         '#f5c518',
     letterSpacing: 0.5,
   },
   dismissBtn: {
