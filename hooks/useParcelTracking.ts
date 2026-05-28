@@ -227,6 +227,27 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     const color        = userParcelColor(uid);
     const fullPoints   = Math.max(1, Math.round(area_sqm / 50));
 
+    // Guard against parcels_session_id_fkey violation: if the sessions row
+    // was never written (silent failure in startTracking), upsert it now so
+    // the FK is satisfied. ignoreDuplicates means this is a no-op when the
+    // row already exists — safe to call unconditionally.
+    if (activeSessionId) {
+      const { error: sessionUpsertErr } = await supabase
+        .from('sessions')
+        .upsert(
+          {
+            id: activeSessionId,
+            user_id: uid,
+            activity: activityType,
+            started_at: new Date().toISOString(),
+          },
+          { onConflict: 'id', ignoreDuplicates: true },
+        );
+      if (sessionUpsertErr) {
+        console.warn('[claimParcel] sessions upsert failed:', sessionUpsertErr.message);
+      }
+    }
+
     // Session participants from DB (populated when session starts + when partner
     // is explicitly added). Also merge local in-memory partners — they may not
     // have been written to session_participants if the pair was accepted after

@@ -213,12 +213,15 @@ export function useRealtimeTracking() {
     const activeSessionId = useSessionStore.getState().sessionId!;
 
     const sessionStartedAt = new Date().toISOString();
-    await supabase.from('sessions').insert({
+    const { error: sessionErr } = await supabase.from('sessions').insert({
       id: activeSessionId,
       user_id: uid,
       activity,
       started_at: sessionStartedAt,
     });
+    if (sessionErr) {
+      console.warn('[useRealtimeTracking] sessions insert failed:', sessionErr.message);
+    }
     await addSessionParticipant(activeSessionId, uid);
 
     useLocationStore.getState().setSessionStartedAt(sessionStartedAt);
