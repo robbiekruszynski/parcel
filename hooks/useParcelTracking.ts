@@ -219,7 +219,7 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     if (!session?.user?.id) throw new Error('Sign in to claim territory.');
 
     const uid = session.user.id;
-    const activeSessionId = sessionId ?? useSessionStore.getState().sessionId;
+    let activeSessionId = sessionId ?? useSessionStore.getState().sessionId;
 
     const cleanedRoute = prepareClaimRoute(route);
     const coordinates  = routeToLatLngPairs(cleanedRoute);
@@ -231,6 +231,8 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     // was never written (silent failure in startTracking), upsert it now so
     // the FK is satisfied. ignoreDuplicates means this is a no-op when the
     // row already exists — safe to call unconditionally.
+    // If the upsert itself fails, fall back to null so the parcel insert
+    // uses a null session_id (allowed by schema) rather than a dangling UUID.
     if (activeSessionId) {
       const { error: sessionUpsertErr } = await supabase
         .from('sessions')
@@ -245,6 +247,7 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
         );
       if (sessionUpsertErr) {
         console.warn('[claimParcel] sessions upsert failed:', sessionUpsertErr.message);
+        activeSessionId = null;
       }
     }
 
