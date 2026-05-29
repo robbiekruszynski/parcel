@@ -265,9 +265,9 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     ];
     const coOwnerIds = uniqueParticipants.filter((id) => id !== uid);
     const partySize = uniqueParticipants.length;
-    const eachPts   = partySize > 1
-      ? Math.max(1, Math.floor(fullPoints / partySize))
-      : fullPoints;
+    // Multiplayer bonus: each person earns base points × party size.
+    // Solo = 1×, duo = 2×, trio = 3×, etc.
+    const eachPts = Math.max(1, fullPoints * partySize);
 
     let sharedGroupId: string | null = null;
     if (coOwnerIds.length > 0) {

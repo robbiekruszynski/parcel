@@ -3,11 +3,13 @@ import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
   Animated,
+  Easing,
   Pressable,
   ScrollView,
   Share,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,6 +18,107 @@ import { useSessionStore } from '@/stores/sessionStore';
 import { useLocationStore } from '@/stores/locationStore';
 import { useSessionResultStore } from '@/stores/sessionResultStore';
 import { useStravaStore } from '@/stores/stravaStore';
+
+// ─── Confetti ─────────────────────────────────────────────────────────────────
+
+const CONFETTI_COLORS = [
+  '#f5c518', '#f5c518', '#f5c518', // amber — triple weight, brand primary
+  '#22d3ee', '#a78bfa', '#34d399', '#fb923c', '#f472b6', '#ffffff',
+];
+
+const PARTICLE_COUNT = 72;
+
+interface Particle {
+  id: number;
+  x: number;
+  color: string;
+  w: number;
+  h: number;
+  yAnim: Animated.Value;
+  rotAnim: Animated.Value;
+  delay: number;
+  duration: number;
+}
+
+function makeParticles(screenW: number): Particle[] {
+  return Array.from({ length: PARTICLE_COUNT }, (_, i) => ({
+    id: i,
+    x: Math.random() * screenW,
+    color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+    w: 5 + Math.random() * 8,
+    h: 8 + Math.random() * 7,
+    yAnim: new Animated.Value(-40),
+    rotAnim: new Animated.Value(0),
+    delay: Math.random() * 1000,
+    duration: 2200 + Math.random() * 1400,
+  }));
+}
+
+function ConfettiOverlay() {
+  const { width, height } = useWindowDimensions();
+
+  const particlesRef = useRef<Particle[]>([]);
+  if (particlesRef.current.length === 0) {
+    particlesRef.current = makeParticles(width);
+  }
+
+  useEffect(() => {
+    const anims = particlesRef.current.map((p) =>
+      Animated.parallel([
+        Animated.timing(p.yAnim, {
+          toValue: height + 80,
+          duration: p.duration,
+          delay: p.delay,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(p.rotAnim, {
+          toValue: 360 * (2 + Math.floor(Math.random() * 3)),
+          duration: p.duration,
+          delay: p.delay,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    Animated.parallel(anims).start();
+
+    return () => {
+      particlesRef.current.forEach((p) => {
+        p.yAnim.stopAnimation();
+        p.rotAnim.stopAnimation();
+      });
+    };
+  }, [height]);
+
+  return (
+    <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+      {particlesRef.current.map((p) => (
+        <Animated.View
+          key={p.id}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: p.x,
+            width: p.w,
+            height: p.h,
+            backgroundColor: p.color,
+            borderRadius: 2,
+            transform: [
+              { translateY: p.yAnim },
+              {
+                rotate: p.rotAnim.interpolate({
+                  inputRange: [0, 360],
+                  outputRange: ['0deg', '360deg'],
+                }),
+              },
+            ],
+          }}
+        />
+      ))}
+    </View>
+  );
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -38,10 +141,7 @@ function fmtPace(distM: number, durationMs: number, activityType: string): strin
   const isCycling = activityType === 'cycling';
   const distKm = distM / 1000;
   const durationH = durationMs / 3_600_000;
-  if (isCycling) {
-    return `${(distKm / durationH).toFixed(1)} km/h`;
-  }
-  // pace = min/km
+  if (isCycling) return `${(distKm / durationH).toFixed(1)} km/h`;
   const minPerKm = durationMs / 60000 / distKm;
   const pMin = Math.floor(minPerKm);
   const pSec = Math.round((minPerKm - pMin) * 60);
@@ -56,8 +156,11 @@ function fmtArea(m2: number | null): string {
 
 function fmtDateTime(ts: number): string {
   const d = new Date(ts);
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
-    ' · ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  return (
+    d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
+    ' · ' +
+    d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  );
 }
 
 function tierLabel(tier: string | null): string {
@@ -84,7 +187,6 @@ function stravaStatusText(connected: boolean, status: string): string {
   return 'Will upload';
 }
 
-// Route → Mapbox GeoJSON
 function routeToGeoJson(coords: { lat: number; lng: number }[]) {
   return {
     type: 'FeatureCollection' as const,
@@ -102,19 +204,14 @@ function routeToGeoJson(coords: { lat: number; lng: number }[]) {
 }
 
 function polygonToGeoJson(coords: [number, number][]) {
-  // coords are [lat, lng] — swap to [lng, lat] for GeoJSON
   const ring = coords.map(([lat, lng]) => [lng, lat] as [number, number]);
-  // close the ring
   if (ring.length > 0) ring.push(ring[0]);
   return {
     type: 'FeatureCollection' as const,
     features: [
       {
         type: 'Feature' as const,
-        geometry: {
-          type: 'Polygon' as const,
-          coordinates: [ring],
-        },
+        geometry: { type: 'Polygon' as const, coordinates: [ring] },
         properties: {},
       },
     ],
@@ -136,27 +233,49 @@ function routeBounds(
   return [[minLng, minLat], [maxLng, maxLat]];
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const ROUTE_ANIM_INTERVAL_MS = 18;
+const DARK    = '#0e0e10';
+const SURFACE = '#13131a';
+const AMBER   = '#f5c518';
+const MUTED   = 'rgba(255,255,255,0.45)';
+const BORDER  = 'rgba(255,255,255,0.08)';
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function SessionEndScreen() {
   const result      = useSessionResultStore((s) => s.result);
   const clearResult = useSessionResultStore((s) => s.clearResult);
 
-  const cameraRef = useRef<MapboxGL.Camera>(null);
+  // 'celebrate' shows confetti hero; 'replay' shows map animation + stats.
+  // Skip celebrate entirely if nothing was claimed.
+  const [phase, setPhase] = useState<'celebrate' | 'replay'>(
+    () => (result?.claimedParcel ? 'celebrate' : 'replay'),
+  );
+
+  const cameraRef    = useRef<MapboxGL.Camera>(null);
   const [animatedRoute, setAnimatedRoute] = useState<{ lat: number; lng: number }[]>([]);
+  const [progress,      setProgress]      = useState(0);
   const animIndexRef = useRef(0);
   const polyOpacity  = useRef(new Animated.Value(0)).current;
   const [showPoly,  setShowPoly]  = useState(false);
   const [polyAlpha, setPolyAlpha] = useState(0);
 
-  // End the session store state on mount
+  // Playback speed — stored in both state (for UI) and ref (read inside interval).
+  const [speed, setSpeedState] = useState(1);
+  const speedRef = useRef(1);
+  const setSpeed = (s: number) => {
+    speedRef.current = s;
+    setSpeedState(s);
+  };
+
+  // End in-memory session on mount.
   useEffect(() => {
     useSessionStore.getState().endSession();
   }, []);
 
-  // Mirror live Strava upload status changes into the result so the row re-renders.
+  // Mirror live Strava upload status into the stored result.
   useEffect(() => {
     return useStravaStore.subscribe((s) => {
       const current = useSessionResultStore.getState().result;
@@ -169,27 +288,33 @@ export default function SessionEndScreen() {
     });
   }, []);
 
-  // Animate route draw, then fade in polygon
+  // Animate route draw — triggered when entering replay phase.
   useEffect(() => {
     if (!result || result.route.length === 0) return;
+    if (phase !== 'replay') return;
 
     animIndexRef.current = 0;
     setAnimatedRoute([]);
+    setProgress(0);
     setShowPoly(false);
     polyOpacity.setValue(0);
     setPolyAlpha(0);
 
     const full = result.route;
-    const id   = setInterval(() => {
-      animIndexRef.current += 1;
-      const slice = full.slice(0, animIndexRef.current);
-      setAnimatedRoute([...slice]);
+
+    const id = setInterval(() => {
+      animIndexRef.current = Math.min(
+        animIndexRef.current + speedRef.current,
+        full.length,
+      );
+      setAnimatedRoute(full.slice(0, animIndexRef.current));
+      setProgress(animIndexRef.current / full.length);
 
       if (animIndexRef.current >= full.length) {
         clearInterval(id);
-        // Fade in polygon if one exists
         if (result.claimedParcel && result.parcelCoords) {
           setShowPoly(true);
+          polyOpacity.removeAllListeners();
           Animated.timing(polyOpacity, {
             toValue: 1,
             duration: 600,
@@ -200,11 +325,13 @@ export default function SessionEndScreen() {
       }
     }, ROUTE_ANIM_INTERVAL_MS);
 
-    return () => clearInterval(id);
+    return () => {
+      clearInterval(id);
+      polyOpacity.removeAllListeners();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result]);
+  }, [result, phase]);
 
-  // Fit camera once map loads
   const handleMapLoad = () => {
     if (!result || result.route.length === 0) return;
     const bounds = routeBounds(result.route);
@@ -222,9 +349,7 @@ export default function SessionEndScreen() {
     if (!result) return;
     const lines: string[] = [`${activityLabel(result.activityType)} session complete!`];
     lines.push(`Distance: ${fmtDistance(result.distanceM)}`);
-    if (result.startedAt) {
-      lines.push(`Duration: ${fmtDuration(result.endedAt - result.startedAt)}`);
-    }
+    if (result.startedAt) lines.push(`Duration: ${fmtDuration(result.endedAt - result.startedAt)}`);
     if (result.claimedParcel) {
       lines.push(`Parcel claimed: +${result.parcelPoints} pts`);
       if (result.parcelTier) lines.push(`Tier: ${tierLabel(result.parcelTier)}`);
@@ -233,33 +358,103 @@ export default function SessionEndScreen() {
     await Share.share({ message: lines.join('\n') });
   };
 
-  // ── No result fallback ────────────────────────────────────────────────────
+  // ── No result fallback ──────────────────────────────────────────────────────
   if (!result) {
     return (
       <SafeAreaView style={styles.fallback}>
         <Text style={styles.fallbackText}>No session data.</Text>
-        <Pressable
-          style={styles.doneBtn}
-          onPress={() => router.replace('/(tabs)/map')}>
+        <Pressable style={styles.doneBtn} onPress={() => router.replace('/(tabs)/map')}>
           <Text style={styles.doneBtnText}>Done</Text>
         </Pressable>
       </SafeAreaView>
     );
   }
 
-  // ── Derived values ────────────────────────────────────────────────────────
   const durationMs  = result.startedAt ? result.endedAt - result.startedAt : 0;
+  const parcelColor = result.parcelColor || AMBER;
   const routeGeoJson = animatedRoute.length >= 2 ? routeToGeoJson(animatedRoute) : null;
   const polyGeoJson  = showPoly && result.parcelCoords
     ? polygonToGeoJson(result.parcelCoords)
     : null;
 
-  const parcelColor  = result.parcelColor || '#f5c518';
+  // ── CELEBRATE phase ─────────────────────────────────────────────────────────
+  if (phase === 'celebrate') {
+    return (
+      <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
 
+        {/* Confetti — rendered behind content, non-interactive */}
+        <ConfettiOverlay />
+
+        {/* Hero content */}
+        <View style={styles.celebrateContainer}>
+
+          {/* Hexagon stamp */}
+          <View style={[styles.celebrateStamp, { borderColor: parcelColor }]}>
+            <Text style={[styles.celebrateStampGlyph, { color: parcelColor }]}>⬡</Text>
+          </View>
+
+          {/* Headline */}
+          <Text style={styles.celebrateTitle}>TERRITORY{'\n'}CLAIMED</Text>
+
+          {/* Points */}
+          <Text style={[styles.celebratePoints, { color: parcelColor }]}>
+            +{result.parcelPoints} pts
+          </Text>
+
+          {/* Tier */}
+          {result.parcelTier ? (
+            <View style={[styles.tierBadge, { borderColor: parcelColor }]}>
+              <Text style={[styles.tierText, { color: parcelColor }]}>
+                {tierLabel(result.parcelTier)}
+              </Text>
+            </View>
+          ) : null}
+
+          {/* Area */}
+          {result.parcelAreaM2 != null ? (
+            <Text style={styles.celebrateSub}>{fmtArea(result.parcelAreaM2)}</Text>
+          ) : null}
+
+          {/* Co-owners */}
+          {result.coOwners.length > 0 ? (
+            <Text style={styles.celebrateSub}>
+              with {result.coOwners.join(', ')}
+            </Text>
+          ) : null}
+
+          {/* Multiplier badge for group claims */}
+          {result.coOwners.length > 0 ? (
+            <View style={styles.multiplierBadge}>
+              <Text style={styles.multiplierText}>
+                {result.coOwners.length + 1}× GROUP BONUS
+              </Text>
+            </View>
+          ) : null}
+        </View>
+
+        {/* Bottom CTAs */}
+        <View style={styles.celebrateBtnContainer}>
+          <Pressable
+            style={({ pressed }) => [styles.replayBtn, pressed && { opacity: 0.85 }]}
+            onPress={() => setPhase('replay')}>
+            <Text style={styles.replayBtnText}>▶  WATCH REPLAY</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [styles.skipBtn, pressed && { opacity: 0.65 }]}
+            onPress={handleDone}>
+            <Text style={styles.skipBtnText}>Skip</Text>
+          </Pressable>
+        </View>
+
+      </SafeAreaView>
+    );
+  }
+
+  // ── REPLAY phase ────────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
 
-      {/* ── Map (top 45%) ──────────────────────────────────────────────── */}
+      {/* Map — top 45% */}
       <View style={styles.mapContainer}>
         <MapboxGL.MapView
           style={StyleSheet.absoluteFillObject}
@@ -272,12 +467,12 @@ export default function SessionEndScreen() {
           <MapboxGL.Camera ref={cameraRef} />
 
           {/* Animated route line */}
-          {routeGeoJson && (
+          {routeGeoJson ? (
             <MapboxGL.ShapeSource id="recap-route" shape={routeGeoJson}>
               <MapboxGL.LineLayer
                 id="recap-route-line"
                 style={{
-                  lineColor: '#f5c518',
+                  lineColor: parcelColor,
                   lineWidth: 3,
                   lineOpacity: 0.9,
                   lineCap: 'round',
@@ -285,17 +480,14 @@ export default function SessionEndScreen() {
                 }}
               />
             </MapboxGL.ShapeSource>
-          )}
+          ) : null}
 
           {/* Claimed parcel polygon */}
-          {polyGeoJson && (
+          {polyGeoJson ? (
             <MapboxGL.ShapeSource id="recap-poly" shape={polyGeoJson}>
               <MapboxGL.FillLayer
                 id="recap-poly-fill"
-                style={{
-                  fillColor: parcelColor,
-                  fillOpacity: polyAlpha * 0.35,
-                }}
+                style={{ fillColor: parcelColor, fillOpacity: polyAlpha * 0.35 }}
               />
               <MapboxGL.LineLayer
                 id="recap-poly-border"
@@ -306,37 +498,57 @@ export default function SessionEndScreen() {
                 }}
               />
             </MapboxGL.ShapeSource>
-          )}
+          ) : null}
         </MapboxGL.MapView>
+
+        {/* Playback progress bar — sits on the map bottom edge */}
+        <View style={styles.progressTrack}>
+          <View
+            style={[
+              styles.progressFill,
+              { width: `${progress * 100}%` as `${number}%`, backgroundColor: parcelColor },
+            ]}
+          />
+        </View>
+
+        {/* Speed controls — overlaid bottom-right of map */}
+        <View style={styles.speedRow}>
+          {([1, 2, 4] as const).map((s) => (
+            <Pressable
+              key={s}
+              style={[styles.speedBtn, speed === s && { backgroundColor: parcelColor }]}
+              onPress={() => setSpeed(s)}>
+              <Text style={[styles.speedBtnText, speed === s && { color: DARK }]}>
+                {s}×
+              </Text>
+            </Pressable>
+          ))}
+        </View>
       </View>
 
-      {/* ── Stats card (bottom 55%) ────────────────────────────────────── */}
+      {/* Stats card — bottom 55% */}
       <ScrollView
         style={styles.sheet}
         contentContainerStyle={styles.sheetContent}
         showsVerticalScrollIndicator={false}>
 
-        {/* Header row */}
+        {/* Header */}
         <View style={styles.headerRow}>
-          <Text style={styles.headerActivity}>
-            {activityLabel(result.activityType)}
-          </Text>
-          <Text style={styles.headerDate}>
-            {fmtDateTime(result.endedAt)}
-          </Text>
+          <Text style={styles.headerActivity}>{activityLabel(result.activityType)}</Text>
+          <Text style={styles.headerDate}>{fmtDateTime(result.endedAt)}</Text>
         </View>
 
         {/* Points hero */}
         {result.claimedParcel ? (
           <View style={styles.heroRow}>
             <Text style={styles.heroPoints}>+{result.parcelPoints} pts</Text>
-            {result.parcelTier && (
+            {result.parcelTier ? (
               <View style={[styles.tierBadge, { borderColor: parcelColor }]}>
                 <Text style={[styles.tierText, { color: parcelColor }]}>
                   {tierLabel(result.parcelTier)}
                 </Text>
               </View>
-            )}
+            ) : null}
           </View>
         ) : (
           <Text style={styles.noClaimText}>Session recorded</Text>
@@ -349,16 +561,12 @@ export default function SessionEndScreen() {
             <Text style={styles.statLabel}>Distance</Text>
           </View>
           <View style={styles.statCell}>
-            <Text style={styles.statValue}>
-              {durationMs > 0 ? fmtDuration(durationMs) : '—'}
-            </Text>
+            <Text style={styles.statValue}>{durationMs > 0 ? fmtDuration(durationMs) : '—'}</Text>
             <Text style={styles.statLabel}>Duration</Text>
           </View>
           <View style={styles.statCell}>
             <Text style={styles.statValue}>
-              {durationMs > 0
-                ? fmtPace(result.distanceM, durationMs, result.activityType)
-                : '—'}
+              {durationMs > 0 ? fmtPace(result.distanceM, durationMs, result.activityType) : '—'}
             </Text>
             <Text style={styles.statLabel}>
               {result.activityType === 'cycling' ? 'Speed' : 'Pace'}
@@ -370,15 +578,15 @@ export default function SessionEndScreen() {
           </View>
         </View>
 
-        {/* Co-owners row */}
-        {result.coOwners.length > 0 && (
+        {/* Co-owners */}
+        {result.coOwners.length > 0 ? (
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>With</Text>
             <Text style={styles.infoValue}>{result.coOwners.join(', ')}</Text>
           </View>
-        )}
+        ) : null}
 
-        {/* Strava row */}
+        {/* Strava */}
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Strava</Text>
           <Text
@@ -411,20 +619,129 @@ export default function SessionEndScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-const DARK    = '#0e0e10';
-const SURFACE = '#13131a';
-const AMBER   = '#f5c518';
-const MUTED   = 'rgba(255,255,255,0.45)';
-const BORDER  = 'rgba(255,255,255,0.08)';
-
 const styles = StyleSheet.create({
-  root: {
+  root: { flex: 1, backgroundColor: DARK },
+
+  // ── Celebrate ──
+  celebrateContainer: {
     flex: 1,
-    backgroundColor: DARK,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    gap: 12,
   },
+  celebrateStamp: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  celebrateStampGlyph: {
+    fontSize: 44,
+    lineHeight: 52,
+  },
+  celebrateTitle: {
+    fontFamily: 'Syne_800ExtraBold',
+    fontSize: 42,
+    color: '#ffffff',
+    textAlign: 'center',
+    letterSpacing: -1,
+    lineHeight: 46,
+  },
+  celebratePoints: {
+    fontFamily: 'Syne_800ExtraBold',
+    fontSize: 54,
+    letterSpacing: -2,
+    marginTop: 4,
+  },
+  celebrateSub: {
+    fontFamily: 'DMMono_400Regular',
+    fontSize: 13,
+    color: MUTED,
+    textAlign: 'center',
+    marginTop: -4,
+  },
+  multiplierBadge: {
+    backgroundColor: 'rgba(245,197,24,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,197,24,0.35)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    marginTop: 4,
+  },
+  multiplierText: {
+    fontFamily: 'BarlowCondensed_900Black',
+    fontSize: 13,
+    color: AMBER,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  celebrateBtnContainer: {
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+    gap: 10,
+  },
+  replayBtn: {
+    backgroundColor: AMBER,
+    borderRadius: 14,
+    paddingVertical: 17,
+    alignItems: 'center',
+  },
+  replayBtnText: {
+    fontFamily: 'Syne_800ExtraBold',
+    fontSize: 15,
+    color: DARK,
+    letterSpacing: 0.5,
+  },
+  skipBtn: {
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  skipBtnText: {
+    fontFamily: 'DMMono_400Regular',
+    fontSize: 13,
+    color: MUTED,
+  },
+
+  // ── Replay ──
   mapContainer: {
     flex: 45,
     minHeight: 0,
+  },
+  progressTrack: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  progressFill: {
+    height: 3,
+  },
+  speedRow: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    flexDirection: 'row',
+    gap: 6,
+  },
+  speedBtn: {
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  speedBtnText: {
+    fontFamily: 'DMMono_400Regular',
+    fontSize: 12,
+    color: '#ffffff',
   },
   sheet: {
     flex: 55,
@@ -439,7 +756,19 @@ const styles = StyleSheet.create({
     gap: 0,
   },
 
-  // Header
+  // ── Shared ──
+  tierBadge: {
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  tierText: {
+    fontFamily: 'BarlowCondensed_900Black',
+    fontSize: 13,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -456,8 +785,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: MUTED,
   },
-
-  // Hero
   heroRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -470,26 +797,12 @@ const styles = StyleSheet.create({
     color: AMBER,
     letterSpacing: -1,
   },
-  tierBadge: {
-    borderWidth: 1,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  tierText: {
-    fontFamily: 'BarlowCondensed_900Black',
-    fontSize: 13,
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-  },
   noClaimText: {
     fontFamily: 'DMMono_400Regular',
     fontSize: 14,
     color: MUTED,
     marginBottom: 20,
   },
-
-  // Stats grid
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -520,8 +833,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
-
-  // Info rows
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -543,8 +854,6 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     marginLeft: 12,
   },
-
-  // Buttons
   btnRow: {
     flexDirection: 'row',
     gap: 10,
@@ -576,8 +885,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: DARK,
   },
-
-  // Fallback
   fallback: {
     flex: 1,
     backgroundColor: DARK,

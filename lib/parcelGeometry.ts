@@ -171,7 +171,10 @@ export function prepareClaimRoute(route: Coord[]): Coord[] {
   return cleaned;
 }
 
-/** Sanitize stored [lat,lng] pairs for map rendering (legacy self-intersecting rings). */
+/** Sanitize stored [lat,lng] pairs for map rendering.
+ *  Coordinates are already simplified+unkinkied at claim time — re-running
+ *  the full pipeline causes double-simplification that collapses polygons to
+ *  triangles. This function only validates and filters GPS spikes. */
 export function sanitizeStoredRing(pairs: [number, number][]): [number, number][] | null {
   const valid = pairs.filter(
     ([lat, lng]) =>
@@ -182,19 +185,12 @@ export function sanitizeStoredRing(pairs: [number, number][]): [number, number][
   );
   if (valid.length < MIN_PARCEL_POINTS) return null;
 
+  // Convert to [lng, lat] for spike filter, then back to [lat, lng] for storage format.
   const asCoords: Coord[] = valid.map(([lat, lng], i) => ({ lat, lng, ts: i }));
-  const ring = filterRingSpikes(coordsToRing(asCoords));
-  if (ring.length < 3) return null;
+  const ring = filterRingSpikes(coordsToRing(asCoords)); // [lng, lat][]
+  if (ring.length < MIN_PARCEL_POINTS) return null;
 
-  try {
-    const simplified = simplifyAndUnkinkRing(ring);
-    const cleaned = ringToCoords(simplified).map((c) => [c.lat, c.lng] as [number, number]);
-    if (cleaned.length >= 3) return cleaned;
-  } catch {
-    // fall through to raw ring
-  }
-
-  return valid.length >= 3 ? valid : null;
+  return ring.map(([lng, lat]) => [lat, lng] as [number, number]);
 }
 
 /** GeoJSON ring [lng,lat][] for one parcel — never connects separate parcels. */
