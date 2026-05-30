@@ -15,6 +15,9 @@ export interface Parcel {
   group_name: string | null;
   /** [lat, lng] pairs — matches the jsonb storage format in Supabase. */
   coordinates: [number, number][];
+  /** Full GPS trail walked — [lat, lng][] stored at claim time (RDP-simplified).
+   *  Null for parcels claimed before migration 008. */
+  route_coordinates: [number, number][] | null;
   area_sqm: number;
   claimed_at: string;
   color: string;

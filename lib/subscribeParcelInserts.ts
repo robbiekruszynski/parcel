@@ -29,8 +29,8 @@ export function subscribeParcelInserts(): () => void {
           const { data } = await supabase
             .from('parcels')
             .select(`
-              id, owner_id, co_owner_id, co_owners, group_id, coordinates, area_sqm, claimed_at,
-              color, points, activity,
+              id, owner_id, co_owner_id, co_owners, group_id, coordinates, route_coordinates,
+              area_sqm, claimed_at, color, points, activity,
               profiles ( username, display_name ),
               groups ( name )
             `)

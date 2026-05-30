@@ -7,6 +7,7 @@ export interface ParcelRow {
   co_owners: string[] | null;
   group_id: string | null;
   coordinates: [number, number][] | null;
+  route_coordinates: [number, number][] | null;
   area_sqm: number | null;
   claimed_at: string;
   color: string | null;
@@ -25,6 +26,7 @@ export function rowToParcel(row: ParcelRow): Parcel {
     group_id:            row.group_id ?? null,
     group_name:          row.groups?.name ?? null,
     coordinates:         row.coordinates ?? [],
+    route_coordinates:   row.route_coordinates ?? null,
     area_sqm:            row.area_sqm ?? 0,
     claimed_at:          row.claimed_at,
     color:               row.color ?? '#f5c518',

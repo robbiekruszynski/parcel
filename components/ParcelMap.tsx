@@ -351,7 +351,7 @@ function ParcelDetailSheet({
             {/* Co-owners line */}
             {parcel.co_owners.length > 0 ? (
               <Text style={styles.ownerDisplayName}>
-                +{parcel.co_owners.length} co-owner{parcel.co_owners.length > 1 ? 's' : ''} · points split {parcel.co_owners.length + 1} ways
+                +{parcel.co_owners.length} co-owner{parcel.co_owners.length > 1 ? 's' : ''} · {parcel.co_owners.length + 1}× group bonus
               </Text>
             ) : parcel.owner_display_name ? (
               <Text style={styles.ownerDisplayName}>{parcel.owner_display_name}</Text>

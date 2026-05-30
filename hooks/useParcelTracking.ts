@@ -21,6 +21,7 @@ import {
   userParcelColor,
 } from '@/lib/parcelGeometry';
 import { rowToParcel, type ParcelRow } from '@/lib/parcelRow';
+import { simplifyPath } from '@/lib/rdp';
 import { fetchSessionParticipantIds } from '@/lib/sessionParticipants';
 import { subscribeParcelInserts } from '@/lib/subscribeParcelInserts';
 import { supabase } from '@/lib/supabase';
@@ -85,8 +86,8 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
       const { data, error } = await supabase
         .from('parcels')
         .select(`
-          id, owner_id, co_owner_id, co_owners, group_id, coordinates, area_sqm, claimed_at,
-          color, points, activity,
+          id, owner_id, co_owner_id, co_owners, group_id, coordinates, route_coordinates,
+          area_sqm, claimed_at, color, points, activity,
           profiles ( username, display_name ),
           groups ( name )
         `)
@@ -225,6 +226,15 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     const coordinates  = routeToLatLngPairs(cleanedRoute);
     const area_sqm     = area(buildGeoJsonPolygon(cleanedRoute));
     const color        = userParcelColor(uid);
+
+    // RDP-simplify the full GPS trail (ε ≈ 5 m) for storage as the replay route.
+    // Keeps ~100-300 points for a typical walk without losing visible shape.
+    const simplifiedTrail = simplifyPath(
+      route.map((c) => ({ latitude: c.lat, longitude: c.lng })),
+    );
+    const route_coordinates: [number, number][] = simplifiedTrail.map(
+      (ll) => [ll.latitude, ll.longitude],
+    );
     const fullPoints   = Math.max(1, Math.round(area_sqm / 50));
 
     // Guard against parcels_session_id_fkey violation: if the sessions row
@@ -290,21 +300,22 @@ export function useParcelTracking(activityType: ActivityType = 'walking') {
     const { data, error } = await supabase
       .from('parcels')
       .insert({
-        owner_id:    uid,
-        session_id:  activeSessionId,
-        co_owner_id: coOwnerIds[0] ?? null,
-        co_owners:   coOwnerIds,
-        group_id:    sharedGroupId,
-        activity:    activityType,
+        owner_id:          uid,
+        session_id:        activeSessionId,
+        co_owner_id:       coOwnerIds[0] ?? null,
+        co_owners:         coOwnerIds,
+        group_id:          sharedGroupId,
+        activity:          activityType,
         coordinates,
+        route_coordinates,
         area_sqm,
         color,
-        points:      eachPts,
-        claimed_at:  new Date().toISOString(),
+        points:            eachPts,
+        claimed_at:        new Date().toISOString(),
       })
       .select(`
-        id, owner_id, co_owner_id, co_owners, group_id, coordinates, area_sqm, claimed_at,
-        color, points, activity,
+        id, owner_id, co_owner_id, co_owners, group_id, coordinates, route_coordinates,
+        area_sqm, claimed_at, color, points, activity,
         profiles ( username, display_name ),
         groups ( name )
       `)

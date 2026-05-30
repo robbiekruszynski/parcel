@@ -31,6 +31,7 @@ interface ParcelDetail {
   id: string;
   owner_id: string;
   coordinates: [number, number][];
+  route_coordinates: [number, number][] | null;
   area_sqm: number;
   claimed_at: string;
   color: string;
@@ -107,7 +108,8 @@ export default function ParcelDetailScreen() {
       const { data, error: err } = await supabase
         .from('parcels')
         .select(`
-          id, owner_id, coordinates, area_sqm, claimed_at, color, points, activity,
+          id, owner_id, coordinates, route_coordinates, area_sqm, claimed_at,
+          color, points, activity,
           profiles ( username, display_name )
         `)
         .eq('id', id)
@@ -119,6 +121,7 @@ export default function ParcelDetailScreen() {
         const row = data as unknown as {
           id: string; owner_id: string;
           coordinates: [number, number][] | null;
+          route_coordinates: [number, number][] | null;
           area_sqm: number | null; claimed_at: string;
           color: string | null; points: number | null;
           activity: string | null;
@@ -128,6 +131,7 @@ export default function ParcelDetailScreen() {
           id: row.id,
           owner_id: row.owner_id,
           coordinates: row.coordinates ?? [],
+          route_coordinates: row.route_coordinates ?? null,
           area_sqm: row.area_sqm ?? 0,
           claimed_at: row.claimed_at,
           color: row.color ?? '#f5c518',
@@ -308,6 +312,15 @@ export default function ParcelDetailScreen() {
           </View>
         </ScrollView>
 
+        {/* Replay route button — only shown when route data exists */}
+        {parcel.route_coordinates && parcel.route_coordinates.length >= 2 ? (
+          <Pressable
+            style={({ pressed }) => [styles.replayBtn, pressed && { opacity: 0.8 }]}
+            onPress={() => router.push(`/tracking/replay?id=${parcel.id}`)}>
+            <Text style={styles.replayBtnText}>▶  Replay Route</Text>
+          </Pressable>
+        ) : null}
+
         {/* Attribution */}
         <Text style={styles.attribution}>© Mapbox © OpenStreetMap</Text>
       </View>
@@ -470,6 +483,19 @@ const styles = StyleSheet.create({
     color: AMBER,
   },
 
+  replayBtn: {
+    backgroundColor: AMBER,
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  replayBtnText: {
+    fontFamily: 'Syne_800ExtraBold',
+    fontSize: 14,
+    color: '#0e0e10',
+    letterSpacing: 0.3,
+  },
   attribution: {
     fontSize: 9,
     color: 'rgba(255,255,255,0.2)',
